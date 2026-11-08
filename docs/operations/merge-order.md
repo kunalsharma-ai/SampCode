@@ -2,7 +2,7 @@
 
 > **Done.** Every PR in this table was merged into `main` on 2026-11-05 in this order, with merge
 > commits, followed by #44, #45 and #46 on 2026-11-06 (`main` = `68f4531`). This page is kept as a
-> record of how the stack was merged. The only open pull request is #47 (SAMPLEON), based on `main`.
+> record of how the stack was merged. The only open pull request is #47 (SampAudience), based on `main`.
 
 The open pull requests are a stack: each one is built on the one before, so they merge one at a time
 from the bottom. Every branch is rebased on the one below it, has no conflicts, and passed
@@ -45,7 +45,7 @@ The Dependabot pull requests (#20 to #25) were closed: PR #44 made the same chan
 
 ## Still waiting on something else
 
-- SAMPLEON: survey host and audience requests are in open PR #47, not merged. Bidzo waits for its API
+- SampAudience: survey host and audience requests are in open PR #47, not merged. SampBidx waits for its API
   documentation; nothing is built for it.
 - Eye tracking is experimental. It is opt-in and marked as not validated in the editor, on the
   respondent screen and in Analysis (ADR 0034). Try it with a few real respondents before relying on
