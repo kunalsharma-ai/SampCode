@@ -114,8 +114,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     call('/me/preferences', 'GET')
       .then(async (res) => {
         if (!res.ok || cancelled) return;
-        signedIn.current = true;
         const body = (await res.json()) as { appearance: unknown; organizationDefault: unknown };
+        if (cancelled) return;
+        // Only now count as signed in: a change made while the body was still being read goes to
+        // `pending` and is merged below, instead of being overwritten by the loaded settings.
+        signedIn.current = true;
         const org = body.organizationDefault ? sanitizeAppearance(body.organizationDefault) : null;
         setOrgDefault(org);
         const base = body.appearance ? sanitizeAppearance(body.appearance) : (org ?? DEFAULT_APPEARANCE);
