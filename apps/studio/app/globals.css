@@ -532,6 +532,10 @@ table.data tbody tr:hover {
 .hotspot-canvas {
   position: relative;
   display: inline-block;
+  /* Hug the picture even inside a flex column (which would otherwise stretch it): areas are stored
+     in percent of the picture, so the drawing box must be exactly the picture. */
+  width: fit-content;
+  align-self: flex-start;
   max-width: 100%;
   line-height: 0;
   cursor: crosshair;

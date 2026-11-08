@@ -80,6 +80,13 @@ test('eye tracking: editor, consent, camera with no face, skip, and results', as
   await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.9, { steps: 5 });
   await page.mouse.up();
   await page.getByLabel('Area label').first().fill('Logo');
+  // The drawing box hugs the picture, so the area is stored in percent of the picture (the results
+  // and the respondent use the picture too). It once stretched to the column width.
+  const img = (await canvas.locator('img').boundingBox())!;
+  expect(Math.abs(box.width - img.width)).toBeLessThan(3);
+  expect(Math.abs(box.height - img.height)).toBeLessThan(3);
+  await expect(page.getByLabel('Area x').first()).toHaveValue(/^(9\.\d|10(\.\d)?)$/);
+  await expect(page.getByLabel('Area w').first()).toHaveValue(/^3[45](\.\d)?$/);
   await page.getByTestId('eyetrack-experimental').scrollIntoViewIfNeeded();
   await shot(page, 'eye-editor', page.locator('main'));
   await page.getByRole('button', { name: 'Publish' }).click();

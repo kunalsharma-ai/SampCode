@@ -861,8 +861,10 @@ function PictureAreas({
   const hasLibrary = useHasMediaLibrary();
   const box = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // Measured against the picture itself, not the box around it, so areas line up with the picture
+  // the respondent and the results see even if the box is ever laid out wider than the picture.
   const pct = (e: React.PointerEvent) => {
-    const r = box.current!.getBoundingClientRect();
+    const r = (box.current!.querySelector('img') ?? box.current!).getBoundingClientRect();
     return {
       x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
       y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100)),
