@@ -427,9 +427,9 @@ describe('PROJEXA adapter (against a mock of the documented contract)', () => {
     projexaOutcomes.set('ptok_CONFLICT', 'quota_full');
     await complete('PX', 'ptok_CONFLICT');
     expect(await deliverNow()).toMatchObject({ failed: 1 });
-    const cb = await prisma.outboundCallback.findFirstOrThrow({
-      where: { vendorId, responseId: { not: '' }, payload: { path: ['token'], equals: 'ptok_CONFLICT' } },
-    });
+    const cb = (await prisma.outboundCallback.findMany({ where: { vendorId, responseId: { not: '' } } })).find(
+      (c) => (c.payload as { token?: string } | null)?.token === 'ptok_CONFLICT',
+    )!;
     expect(cb).toMatchObject({ state: 'FAILED', lastHttpStatus: 409, attempts: 1 });
     expect(cb.lastError).toMatch(/conflict/);
   });
@@ -437,7 +437,17 @@ describe('PROJEXA adapter (against a mock of the documented contract)', () => {
   it('records abandoned interviews as partial and tells PROJEXA', async () => {
     const s = await start('PX', 'ptok_GONE');
     expect(s.state).toBe('in_progress');
-    await prisma.$executeRaw`UPDATE "Response" SET "updatedAt" = now() - interval '3 days' WHERE uid = 'ptok_GONE'`;
+    // updatedAt is set by Prisma on every update, so it is moved back with a raw update.
+    await prisma.$runCommandRaw({
+      update: 'Response',
+      updates: [
+        {
+          q: { uid: 'ptok_GONE' },
+          u: { $set: { updatedAt: { $date: new Date(Date.now() - 3 * 86_400_000).toISOString() } } },
+          multi: true,
+        },
+      ],
+    });
     const r = await deliverNow();
     expect(r.abandoned).toBeGreaterThanOrEqual(1);
     expect(projexaOutcomes.get('ptok_GONE')).toBe('partial');

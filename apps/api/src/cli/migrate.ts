@@ -1,17 +1,21 @@
 /**
- * Operator command (Milestone 13): apply database migrations, then exit. The ECS migration task runs
- * it before each release; it accepts DATABASE_URL or the DB_* parts (see database-url.ts).
+ * Operator command (Milestone 13): create the MongoDB collections and indexes, then exit. The ECS
+ * migration task runs it before each release; it accepts DATABASE_URL or the DB_* parts (see
+ * database-url.ts). Running it again is a no-op (see packages/db/src/indexes.ts).
  *
  *   node apps/api/dist/cli/migrate.js
  */
 import '../database-url';
-import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { PrismaClient, syncIndexes } from '@zapx/db';
 
-const root = resolve(__dirname, '../../../..');
-const prisma = resolve(root, 'packages/db/node_modules/.bin/prisma');
-const r = spawnSync(prisma, ['migrate', 'deploy', '--schema', resolve(root, 'packages/db/prisma/schema.prisma')], {
-  stdio: 'inherit',
-  env: process.env,
-});
-process.exit(r.status ?? 1);
+const prisma = new PrismaClient();
+syncIndexes(prisma)
+  .then(async (n) => {
+    process.stdout.write(`MongoDB collections and ${n} indexes are in place\n`);
+    await prisma.$disconnect();
+  })
+  .catch(async (e) => {
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

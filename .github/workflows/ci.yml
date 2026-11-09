@@ -19,21 +19,19 @@ permissions:
 jobs:
   test:
     # Set the repository variable CI_RUNNER to "self-hosted" to run on your own machine, which costs
-    # no Actions minutes (it needs Docker for the Postgres service). Default: GitHub's runner.
+    # no Actions minutes (it needs Docker for the MongoDB container). Default: GitHub's runner.
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: zapx
-          POSTGRES_PASSWORD: zapx
-          POSTGRES_DB: zapx
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U zapx" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v7
+      # MongoDB as a one-member replica set (Prisma needs one for transactions). A service container
+      # cannot be given --replSet, so it is started here.
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:8.0 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' && break; sleep 2; done
+          docker exec mongo mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
+          for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true && break; sleep 2; done
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:

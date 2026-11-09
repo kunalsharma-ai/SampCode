@@ -94,7 +94,7 @@ Redirects, callbacks, the redirect log and the vendor API form one separable mod
 only the abstract `RedirectService`. Direct vendors are resolved by SampCode with the precedence
 vendor + country > vendor > project + country > project > organization; PROJEXA vendors follow
 PROJEXA's documented survey-platform contract (not yet verified against a live PROJEXA). Outcome
-callbacks go through a PostgreSQL outbox with retries, a dead letter and manual replay. Details:
+callbacks go through a database outbox with retries, a dead letter and manual replay. Details:
 [modules/redirects.md](modules/redirects.md), [ADR 0003](adr/0003-redirect-and-vendor-integration.md).
 
 ## AI gateway (Milestone 4)
@@ -131,15 +131,16 @@ have their own role and cannot reach the studio API. Details: [modules/capi.md](
 - **Webhooks.** Signed JSON events from an outbox, delivered by the callback worker with the same
   retries and SSRF guard. Payloads never carry answers. [ADR 0011](adr/0011-outbound-webhooks.md)
 - **Audit log viewer** with filters, paging and CSV export.
-- **Row-level security** on `Response`, applied to the studio's respondent-data reads through a
-  tenant-scoped Prisma client. [ADR 0012](adr/0012-row-level-security.md)
+- **Tenant isolation** on respondent data, applied to the studio's reads through a tenant-scoped
+  Prisma client ([ADR 0040](adr/0040-mongodb.md); PostgreSQL row-level security before, ADR 0012).
+- **MongoDB** (replica set) through Prisma since November 2026. [ADR 0040](adr/0040-mongodb.md)
 
 Details: [modules/access-and-api-keys.md](modules/access-and-api-keys.md),
 [modules/webhooks.md](modules/webhooks.md).
 
 ## Background jobs and files (Milestone 7)
 
-- **Job queue in PostgreSQL.** Exports, QA runs above 2,000 respondents and AI drafts are queued in
+- **Job queue in the database.** Exports, QA runs above 2,000 respondents and AI drafts are queued in
   `Job` and claimed with `SKIP LOCKED` under a renewable lease, so a crashed worker's job is picked up
   again. Jobs run as their creator, reloaded from the database, through the same services as the
   HTTP endpoints. [ADR 0013](adr/0013-background-jobs-and-file-storage.md)
@@ -288,7 +289,7 @@ Each is an interface with one first provider, off by default, tested against a l
 - Architecture decisions: [adr/](adr/README.md)
 - Vendor API contract: [api/openapi.yaml](api/openapi.yaml)
 - CAPI app API contract: [api/capi-openapi.yaml](api/capi-openapi.yaml)
-- Database operations (migrations, pooling, backups): [operations/database.md](operations/database.md)
+- Database operations (collections and indexes, pooling, backups): [operations/database.md](operations/database.md)
 - Security checks and accepted exceptions: [security.md](security.md)
 
 ## Security notes
@@ -296,7 +297,7 @@ Each is an interface with one first provider, off by default, tested against a l
 - Session cookie is httpOnly, SameSite=Lax; mutating requests with the cookie also require the
   `x-zapx-csrf` header. API clients can use `Authorization: Bearer`.
 - Every studio query is scoped by `tenantId` from the session, and project, survey and vendor lookups
-  also by the member's project access. Postgres row-level security on `Response` backs up the
+  also by the member's project access. The tenant-scoped client (`forTenant`) backs up the
   studio's respondent-data reads, and since PR #45 also `CatiCase`, `CatiCall`, `DoNotCall`, `Contact`,
   `Invitation`, `BackCheck` and `QualityAppeal` (not system paths; see ADR 0012). It only
   applies when the API's database role is not a superuser; check `GET /api/audit/security`.
@@ -311,7 +312,7 @@ Each is an interface with one first provider, off by default, tested against a l
 ## Known limits
 
 - Files are on a shared local disk or in S3 (`FILE_STORE`); the S3 store is tested against a fake S3
-  server, not AWS yet. Jobs are polled from PostgreSQL (fine for hundreds an hour).
+  server, not AWS yet. Jobs are polled from the database (fine for hundreds an hour).
 - AI proposals return a full definition, so very long questionnaires may need to be imported in parts.
 - The Claude provider has been tested with a scripted fake; it needs an API key to be exercised live.
 - Grid questions are single choice per row. MaxDiff and conjoint exist (PR #33).
@@ -321,8 +322,8 @@ Each is an interface with one first provider, off by default, tested against a l
 - CAPI quotas are only known at sync, so the field can exceed a quota (kept as quota full).
 - The CAPI app is a web app (location, consented audio and photos since M12) with no device
   management (MDM) yet.
-- Row-level security covers `Response` and `Capture` for studio reads only, and is bypassed by the local
-  `docker compose` database role (a superuser). Other tables rely on application filters.
+- The tenant-scoped client covers the respondent-data models for studio reads only; nested
+  includes and other collections rely on application filters.
 - API keys are role-scoped only (no per-endpoint scopes or IP allow lists).
 - CATI has click-to-call and recording through Twilio (M19) and calling rules (M18), but no
   predictive dialing, answering-machine detection or in-browser softphone.

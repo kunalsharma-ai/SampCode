@@ -16,7 +16,7 @@ export interface SaveFile {
   createdById?: string | null;
 }
 
-/** Stored files: metadata in Postgres, bytes in the FileStore, always with an expiry. */
+/** Stored files: metadata in the database, bytes in the FileStore, always with an expiry. */
 @Injectable()
 export class FilesService {
   private readonly log = new Logger('Files');

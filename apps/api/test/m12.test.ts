@@ -202,9 +202,10 @@ describe('online fraud signals and photo answers', () => {
     expect(file.headers['cross-origin-resource-policy']).toBe('same-origin');
     expect(Buffer.compare(file.body as Buffer, JPEG)).toBe(0);
     await http.get(url).set(viewer).set('Range', 'bytes=100-199').expect(206);
-    const views = await prisma.auditEvent.count({
-      where: { action: 'capture.view', data: { path: ['captureId'], equals: item.photos[0].id } },
-    });
+    // MongoDB has no JSON path filter in Prisma: filter the audit events here.
+    const views = (await prisma.auditEvent.findMany({ where: { action: 'capture.view' }, select: { data: true } })).filter(
+      (e) => (e.data as { captureId?: string } | null)?.captureId === item.photos[0].id,
+    ).length;
     expect(views).toBe(1);
   });
 

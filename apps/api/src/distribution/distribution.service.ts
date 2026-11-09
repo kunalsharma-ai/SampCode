@@ -19,6 +19,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { parseCsv } from '../imports/template-import';
 import { emailProvider, type EmailProvider } from './mailer';
 import { MAX_SMS_BODY, normalizePhone, smsProvider, type SmsProvider } from './sms';
+import { createManySkipDuplicates } from '../common/mongo-compat';
 
 export const MAX_CONTACTS = 100_000;
 /** Code of the project source that invitation links enter through. */
@@ -156,10 +157,11 @@ export class DistributionService {
         (c.phone ? matches.find((m) => m.phone === c.phone) : undefined);
       const fresh = chunk.filter((c) => !find(c));
       if (fresh.length) {
-        const n = await this.prisma.contact.createMany({
-          data: fresh.map((c) => ({ ...c, fields: c.fields as Prisma.InputJsonValue, tenantId: user.tenantId, surveyId })),
-          skipDuplicates: true,
-        });
+        const n = await createManySkipDuplicates(
+          this.prisma.contact,
+          'Contact',
+          fresh.map((c) => ({ ...c, fields: c.fields as Prisma.InputJsonValue, tenantId: user.tenantId, surveyId })),
+        );
         added += n.count;
       }
       // Re-importing updates names, numbers and columns, but never resubscribes someone who opted out.
@@ -250,12 +252,34 @@ export class DistributionService {
   private async respondedByWave(ids: string[]) {
     const out = new Map<string, { started: number; completed: number }>();
     if (!ids.length) return out;
-    const rows = await this.prisma.$queryRaw<Array<{ distributionId: string; started: bigint; completed: bigint }>>`
-      SELECT i."distributionId", COUNT(r.id) AS started, COUNT(r.id) FILTER (WHERE r.status = 'COMPLETE') AS completed
-      FROM "Invitation" i JOIN "Distribution" d ON d.id = i."distributionId"
-      JOIN "Response" r ON r."surveyId" = d."surveyId" AND r.uid = i.uid
-      WHERE i."distributionId" = ANY(${ids}) GROUP BY i."distributionId"`;
-    for (const r of rows) out.set(r.distributionId, { started: Number(r.started), completed: Number(r.completed) });
+    // Responses whose uid is an invitation's, in the wave's survey: started, and completed.
+    const rows = (await this.prisma.invitation.aggregateRaw({
+      pipeline: [
+        { $match: { distributionId: { $in: ids } } },
+        { $lookup: { from: 'Distribution', localField: 'distributionId', foreignField: '_id', as: 'd' } },
+        { $unwind: '$d' },
+        {
+          $lookup: {
+            from: 'Response',
+            let: { s: '$d.surveyId', u: '$uid' },
+            pipeline: [
+              { $match: { $expr: { $and: [{ $eq: ['$surveyId', '$$s'] }, { $eq: ['$uid', '$$u'] }] } } },
+              { $project: { status: 1 } },
+            ],
+            as: 'r',
+          },
+        },
+        { $unwind: '$r' },
+        {
+          $group: {
+            _id: '$distributionId',
+            started: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$r.status', 'COMPLETE'] }, 1, 0] } },
+          },
+        },
+      ],
+    })) as unknown as Array<{ _id: string; started: number; completed: number }>;
+    for (const r of rows) out.set(r._id, { started: Number(r.started), completed: Number(r.completed) });
     return out;
   }
 
@@ -342,15 +366,16 @@ export class DistributionService {
       select: { id: true },
     });
     for (let i = 0; i < contacts.length; i += 1000)
-      await this.prisma.invitation.createMany({
-        data: contacts.slice(i, i + 1000).map((c) => ({
+      await createManySkipDuplicates(
+        this.prisma.invitation,
+        'Invitation',
+        contacts.slice(i, i + 1000).map((c) => ({
           tenantId: d.tenantId,
           distributionId: d.id,
           contactId: c.id,
           uid: `inv-${randomBytes(15).toString('base64url')}`,
         })),
-        skipDuplicates: true,
-      });
+      );
   }
 
   /** One pass of the sender: start due waves, send queued invitations, send due reminders. */

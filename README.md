@@ -37,12 +37,12 @@ interviewer role, and the offline CAPI interviewer app with server-checked sync.
 
 **Milestone 6 (enterprise access and API)** adds project-level access (members who only see assigned
 projects), role changes that apply at once, organization API keys, signed outbound webhooks, an audit
-log viewer with CSV export, and PostgreSQL row-level security on respondent data for the studio's
-reads.
+log viewer with CSV export, and tenant isolation on respondent data for the studio's reads
+(PostgreSQL row-level security at the time; since the move to MongoDB, `forTenant`).
 
 **Milestone 7 (background jobs and files)** moves long work off the browser request: background
 exports with expiring download links, QA runs of up to 10,000 synthetic respondents, and AI drafts
-as jobs with progress. Jobs are queued in PostgreSQL and can run in a separate worker process
+as jobs with progress. Jobs are queued in the database and can run in a separate worker process
 (`docker compose` runs one); old files, jobs and webhook deliveries are cleaned up automatically.
 
 **Milestone 8 (identity and plans)** adds single sign-on with OpenID Connect (Entra ID, Okta, Google
@@ -157,13 +157,13 @@ super admin console (#41), the Android and iOS app (#40), Node 26 LTS (#44) and 
 | SCIM provisioning        | Your identity provider creates, updates and deactivates members through SCIM 2.0 (users; roles from `roles`). Token shown once, rotate or revoke any time                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Plans and usage          | Settings → Plan: team members, interviewers, live surveys and this month's completes against the plan. Limits are enforced; operators change plans with a command                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Billing (optional)       | With `BILLING=stripe`: admins buy a plan with Stripe Checkout and manage it in the Stripe portal; signed webhooks set the plan (failed payments keep it while Stripe retries, cancellation falls back to free). Tested against a fake Stripe, **not yet with a Stripe account** ([guide](docs/modules/billing.md))                                                                                                                                                                                                                                                               |
-| Deployment on AWS        | `infra/terraform`: VPC, ECS Fargate (API, worker, studio), RDS PostgreSQL, S3 + CloudFront for the respondent and CAPI apps, KMS, Secrets Manager, alarms, AWS WAF, autoscaling and AWS Backup; `infra/scripts/deploy-aws.sh` releases. Validated and plan-tested with a mocked provider, **not yet applied to an AWS account** ([guide](infra/terraform/README.md))                                                                                                                                                                                                             |
+| Deployment on AWS        | `infra/terraform`: VPC, ECS Fargate (API, worker, studio), RDS PostgreSQL (not yet moved to MongoDB, see ADR 0040), S3 + CloudFront for the respondent and CAPI apps, KMS, Secrets Manager, alarms, AWS WAF, autoscaling and AWS Backup; `infra/scripts/deploy-aws.sh` releases. Validated and plan-tested with a mocked provider, **not yet applied to an AWS account** ([guide](infra/terraform/README.md))                                                                                                                                                                    |
 | File storage             | Local disk or S3 (`FILE_STORE=s3`, SSE-KMS) for exports, media, photos and recordings ([guide](docs/modules/jobs-and-files.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Phone interviews (CATI)  | Upload a call list (CSV); interviewers take the next case from Calls, dial the shown number, run the interview in the runtime and record the outcome. Callbacks, retries, max attempts, reopen, erase numbers; calling hours in each respondent's time zone; an organization-wide do-not-call list (hashed numbers); an optional phone dialer through Twilio (`TELEPHONY=twilio`) that hides numbers from interviewers and can record calls into the interview, tested against a stand-in only ([guide](docs/modules/cati.md))                                                   |
 | Analysis and reports     | Analysis tab: frequencies (counts, shares, numeric statistics, open-answer samples) and crosstabs with significance letters; filters; saved reports rerun on the latest data, Excel download. Rim weighting (raking) to target shares, with efficiency and effective base; tests use the effective base ([guide](docs/modules/analytics.md))                                                                                                                                                                                                                                     |
 | Rich media and new types | Rating scale / NPS, ranking (tap to rank), constant sum and sliders; images, video and audio on questions and pictures as answers; play to the end; read aloud with the device voices ([guide](docs/modules/rich-media.md))                                                                                                                                                                                                                                                                                                                                                      |
 | Fraud and capture        | Fraud signals in the quality score; block a rejected complete's device and network for the organization; photo questions (shrunk, metadata removed, private); CAPI location at start and end, recording after the respondent agrees, overlapping-interview check; optional VPN, proxy, Tor and data-centre check through IPinfo (`NETWORK_REPUTATION=ipinfo`), and transcripts of recordings through Deepgram (`TRANSCRIPTION=deepgram`), both tested against stand-ins only; evidence in the review queue ([guide](docs/modules/data-quality.md), [CAPI](docs/modules/capi.md)) |
-| Row-level security       | PostgreSQL policy on respondent data: the studio's reads of responses, exports, review queue and fieldwork run scoped to the organization in the database too. Applies when the API's database role is not a superuser ([details](docs/adr/0012-row-level-security.md))                                                                                                                                                                                                                                                                                                          |
+| Tenant isolation         | The studio's reads of responses, exports, review queue and fieldwork go through a client that adds the organization to every filter and refuses writes for another one, behind the per-query tenant filters ([details](docs/adr/0040-mongodb.md))                                                                                                                                                                                                                                                                                                                                |
 | Deletion                 | Projects, surveys and vendors are soft-deleted: they disappear and their links stop working, history is kept                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Edge protection          | AWS WAF (count mode first), autoscaling, AWS Backup and a go-live checklist (Milestone 14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Weighting                | Rim weighting in analysis with unweighted and effective bases (Milestone 15)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -191,7 +191,7 @@ packages/
   survey-renderer/  Question components shared by runtime and studio preview
   redirect-core/    Redirect & Vendor Integration core (no framework; extractable)
   quality-core/     Data quality checks, score and fieldwork metrics (no framework)
-  db/               Prisma schema, migrations and seed
+  db/               Prisma schema, MongoDB index setup and seed
 e2e/          Playwright acceptance tests through the real UI
 docs/         Architecture, ADRs, module docs, API contract, operations, examples
 infra/        nginx config, backup and restore scripts
@@ -199,7 +199,7 @@ infra/        nginx config, backup and restore scripts
 
 ## Running locally
 
-Requirements: Node 26 (LTS; `.nvmrc`), pnpm 10, PostgreSQL 16 (or Docker).
+Requirements: Node 26 (LTS; `.nvmrc`), pnpm 10, MongoDB 7 or later as a replica set (or Docker).
 
 **Everything in containers** (no Node needed): `docker compose up --build`, then open
 http://localhost:3000 (studio), http://localhost:5173 (respondent runtime) and
@@ -210,9 +210,9 @@ http://localhost:5174 (interviewer app).
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d postgres   # or point DATABASE_URL at your own Postgres
+docker compose up -d mongo      # a one-member replica set; or point DATABASE_URL at your own
 pnpm build
-pnpm db:migrate
+pnpm db:migrate      # creates the collections and indexes
 pnpm db:seed          # creates admin@zapx.local / zapx-admin-123
 ```
 

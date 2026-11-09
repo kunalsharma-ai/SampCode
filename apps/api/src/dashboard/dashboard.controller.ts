@@ -69,20 +69,21 @@ export class DashboardController {
   /** Responses per UTC day: started (startedAt) or completed (completedAt, completes only). */
   private async daily(tenantId: string, surveyIds: string[], since: Date, column: 'startedAt' | 'completedAt') {
     if (!surveyIds.length) return [];
-    const [, rows] = await this.prisma.$transaction([
-      this.prisma.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, TRUE)`,
-      column === 'startedAt'
-        ? this.prisma.$queryRaw<Array<{ d: string; n: number }>>`
-            SELECT to_char("startedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d, count(*)::int AS n FROM "Response"
-            WHERE "tenantId" = ${tenantId} AND "surveyId" = ANY(${surveyIds}) AND "isTest" = false AND "startedAt" >= ${since}
-            GROUP BY 1`
-        : this.prisma.$queryRaw<Array<{ d: string; n: number }>>`
-            SELECT to_char("completedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d, count(*)::int AS n FROM "Response"
-            WHERE "tenantId" = ${tenantId} AND "surveyId" = ANY(${surveyIds}) AND "isTest" = false AND "status" = 'COMPLETE'
-              AND "completedAt" >= ${since}
-            GROUP BY 1`,
-    ]);
-    return rows;
+    const rows = (await this.prisma.response.aggregateRaw({
+      pipeline: [
+        {
+          $match: {
+            tenantId,
+            surveyId: { $in: surveyIds },
+            isTest: false,
+            ...(column === 'completedAt' ? { status: 'COMPLETE' } : {}),
+            [column]: { $gte: { $date: since.toISOString() } },
+          },
+        },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$' + column, timezone: 'UTC' } }, n: { $sum: 1 } } },
+      ],
+    })) as unknown as Array<{ _id: string; n: number }>;
+    return rows.map((r) => ({ d: r._id, n: Number(r.n) }));
   }
 
   @Get()

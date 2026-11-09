@@ -9,7 +9,7 @@ export class HealthController {
   @Public()
   @Get()
   async health() {
-    await this.prisma.$queryRaw`SELECT 1`;
+    await this.prisma.ping();
     return { ok: true };
   }
 }

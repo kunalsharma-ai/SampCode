@@ -16,7 +16,7 @@ they are accepted; a later record supersedes an earlier one.
 | [0009](0009-local-quality-gates.md)              | Quality gates run locally; GitHub Actions is optional                      | Accepted                                               |
 | [0010](0010-project-access-and-api-keys.md)      | Project-level access and organization API keys                             | Accepted                                               |
 | [0011](0011-outbound-webhooks.md)                | Signed outbound webhooks                                                   | Accepted                                               |
-| [0012](0012-row-level-security.md)               | PostgreSQL row-level security on respondent data                           | Accepted                                               |
+| [0012](0012-row-level-security.md)               | PostgreSQL row-level security on respondent data                           | Superseded by 0040                                     |
 | [0013](0013-background-jobs-and-file-storage.md) | Background jobs and file storage in PostgreSQL                             | Accepted (file storage extended by 0019)               |
 | [0014](0014-sso-scim-and-plans.md)               | Single sign-on, SCIM provisioning and plan limits                          | Accepted (SAML and billing added by 0019)              |
 | [0015](0015-cati-call-lists.md)                  | CATI call lists on the existing interview engine                           | Accepted                                               |
@@ -44,5 +44,6 @@ they are accepted; a later record supersedes an earlier one.
 | [0037](0037-mobile-app.md)                       | ZAPX mobile app: Expo, live super-admin feature gating                     | Accepted                                               |
 | [0038](0038-rename-to-sampcode.md)               | ZAPX renamed SampCode: user-facing name and artwork, identifiers kept      | Accepted                                               |
 | [0039](0039-sampbidx-sampaudience-names.md)      | Bidzo renamed SampBidx and SAMPLEON renamed SampAudience in user text      | Accepted                                               |
+| [0040](0040-mongodb.md)                          | MongoDB in place of PostgreSQL                                             | Accepted                                               |
 
 Template: copy an existing record; sections are Context, Decision, Consequences.

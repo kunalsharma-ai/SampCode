@@ -6,6 +6,7 @@
 import { Injectable } from '@nestjs/common';
 import type { CallbackState, OutboundCallback, Prisma, Project, Response, Tenant, Vendor } from '@zapx/db';
 import { PrismaService } from '../common/prisma.service';
+import { claim, createManySkipDuplicates } from '../common/mongo-compat';
 
 export interface VendorContext {
   vendor: Vendor;
@@ -62,15 +63,14 @@ export class RedirectRepository {
 
   /** Recorded once per response and status; rejections without a response are always recorded. */
   async recordRedirect(e: NewRedirectEvent) {
-    await this.prisma.redirectEvent.createMany({ data: [e], skipDuplicates: true });
+    await createManySkipDuplicates(this.prisma.redirectEvent, 'RedirectEvent', [{ ...e }]);
   }
 
   /** Idempotent: a second outcome with the same key is ignored. Returns true when queued. */
   async enqueueCallback(c: NewCallback): Promise<boolean> {
-    const r = await this.prisma.outboundCallback.createMany({
-      data: [{ ...c, payload: (c.payload ?? undefined) as Prisma.InputJsonValue | undefined }],
-      skipDuplicates: true,
-    });
+    const r = await createManySkipDuplicates(this.prisma.outboundCallback, 'OutboundCallback', [
+      { ...c, payload: (c.payload ?? undefined) as Prisma.InputJsonValue | undefined },
+    ]);
     return r.count === 1;
   }
 
@@ -78,17 +78,16 @@ export class RedirectRepository {
    * Claim due callbacks for delivery. The lease (nextAttemptAt pushed forward) keeps other
    * workers away; if this worker dies, the callback becomes due again when the lease expires.
    */
-  claimDue(limit: number, leaseMs: number): Promise<OutboundCallback[]> {
-    return this.prisma.$queryRaw<OutboundCallback[]>`
-      UPDATE "OutboundCallback" SET "nextAttemptAt" = now() + (${leaseMs} * interval '1 millisecond'), "updatedAt" = now()
-      WHERE id IN (
-        SELECT id FROM "OutboundCallback"
-        WHERE state = 'PENDING' AND "nextAttemptAt" <= now()
-        ORDER BY "nextAttemptAt" ASC
-        LIMIT ${limit}
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *`;
+  async claimDue(limit: number, leaseMs: number): Promise<OutboundCallback[]> {
+    const now = new Date();
+    const ids = await claim(
+      this.prisma.outboundCallback,
+      { state: 'PENDING', nextAttemptAt: { lte: now } },
+      { nextAttemptAt: 'asc' },
+      limit,
+      { nextAttemptAt: new Date(now.getTime() + leaseMs) },
+    );
+    return this.prisma.outboundCallback.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: 'asc' } });
   }
 
   async saveAttempt(

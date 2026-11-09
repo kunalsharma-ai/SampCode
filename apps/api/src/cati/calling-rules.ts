@@ -6,7 +6,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { config } from '../config';
 
-/** True when the runtime (and so Postgres, which uses the same IANA database) knows the zone. */
+/** True when the runtime (Intl, with the IANA time zone database) knows the zone. */
 export function isTimeZone(tz: string): boolean {
   if (!/^[A-Za-z0-9_+\-/]{1,64}$/.test(tz)) return false;
   try {

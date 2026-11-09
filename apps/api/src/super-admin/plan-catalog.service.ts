@@ -3,6 +3,7 @@ import type { Prisma, SubscriptionPlan } from '@zapx/db';
 import { PrismaService } from '../common/prisma.service';
 import { PLANS, PLAN_CODES, isPlanCode, planOf, type PlanLimits } from '../plans/plans';
 import { allFeatures } from './features';
+import { createManySkipDuplicates } from '../common/mongo-compat';
 
 export interface CatalogPlan {
   code: string;
@@ -60,8 +61,10 @@ export class PlanCatalogService implements OnModuleInit, OnModuleDestroy {
   async ensureDefaults() {
     try {
       if (await this.prisma.subscriptionPlan.count()) return;
-      await this.prisma.subscriptionPlan.createMany({
-        data: PLAN_CODES.map((code, i) => ({
+      await createManySkipDuplicates(
+        this.prisma.subscriptionPlan,
+        'SubscriptionPlan',
+        PLAN_CODES.map((code, i) => ({
           code,
           name: PLANS[code].name,
           limits: PLANS[code].limits as unknown as Prisma.InputJsonValue,
@@ -69,8 +72,7 @@ export class PlanCatalogService implements OnModuleInit, OnModuleDestroy {
           mobileFeatures: allFeatures('mobile'),
           sortOrder: i,
         })),
-        skipDuplicates: true,
-      });
+      );
     } catch (e) {
       this.log.warn(`Could not write the built-in plans: ${(e as Error).message}`);
     }

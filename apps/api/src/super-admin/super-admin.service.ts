@@ -367,7 +367,8 @@ export class SuperAdminService {
         ...(tenantId ? { tenantId } : {}),
         ...(q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { name: { contains: q, mode: 'insensitive' } }] } : {}),
       },
-      orderBy: [{ lastSeenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      // MongoDB sorts null lowest, so never-seen members come last in descending order.
+      orderBy: [{ lastSeenAt: 'desc' }, { createdAt: 'desc' }],
       take: 500,
       select: {
         id: true,

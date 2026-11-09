@@ -31,6 +31,7 @@ import {
   type Metric,
   type RuleInput,
 } from './automation-rules';
+import { claim } from '../common/mongo-compat';
 
 const BATCH = 50;
 const MAX_RECIPIENTS = 50;
@@ -279,12 +280,8 @@ export class AutomationService {
       out.scheduled++;
     }
     for (let round = 0; round < 4; round++) {
-      const runs = await this.prisma.$queryRaw<AutomationRun[]>`
-        UPDATE "AutomationRun" SET state = 'RUNNING', "updatedAt" = now()
-        WHERE id IN (
-          SELECT id FROM "AutomationRun" WHERE state = 'PENDING' ORDER BY "createdAt" ASC LIMIT ${BATCH} FOR UPDATE SKIP LOCKED
-        )
-        RETURNING *`;
+      const ids = await claim(this.prisma.automationRun, { state: 'PENDING' }, { createdAt: 'asc' }, BATCH, { state: 'RUNNING' });
+      const runs = await this.prisma.automationRun.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: 'asc' } });
       if (!runs.length) break;
       for (const run of runs) {
         const state = await this.execute(run, now).catch(async (e: Error) => {

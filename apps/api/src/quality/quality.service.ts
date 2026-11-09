@@ -33,6 +33,7 @@ import { RedirectService } from '../integrations/redirect.service';
 import type { AuthUser } from '../auth/auth.types';
 import { CaptureService } from '../captures/capture.service';
 import { signingKey } from '../common/signing-keys';
+import { createManySkipDuplicates } from '../common/mongo-compat';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -115,11 +116,7 @@ export class QualityService {
       fraud.geo = { country: r.geoCountry, expected: settings.countries.length ? settings.countries : declared };
     }
     if (!r.isTest) {
-      const [m] = await db.$queryRaw<Array<{ median: number | null; n: bigint }>>`
-        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY "durationMs") AS median, count(*) AS n
-        FROM "Response"
-        WHERE "surveyId" = ${r.surveyId} AND "status" = 'COMPLETE' AND "isTest" = false AND "durationMs" IS NOT NULL AND "id" <> ${r.id}`;
-      if (m && Number(m.n) >= MIN_COMPLETES_FOR_MEDIAN && m.median !== null) medianMs = Number(m.median);
+      medianMs = await medianDuration(db, r.surveyId, r.id);
 
       const prints = openEndFingerprints(def, answers);
       if (prints.length) {
@@ -171,10 +168,11 @@ export class QualityService {
     if (r.isTest) return;
     const prints = openEndFingerprints(def, answers);
     if (prints.length === 0) return;
-    await db.openEndFingerprint.createMany({
-      data: prints.map((p) => ({ surveyId: r.surveyId, questionId: p.questionId, hash: p.hash, responseId: r.id })),
-      skipDuplicates: true,
-    });
+    await createManySkipDuplicates(
+      db.openEndFingerprint,
+      'OpenEndFingerprint',
+      prints.map((p) => ({ surveyId: r.surveyId, questionId: p.questionId, hash: p.hash, responseId: r.id })),
+    );
   }
 
   // ---- Review queue ---------------------------------------------------------------------------
@@ -377,10 +375,9 @@ export class QualityService {
       ['network', r.ipHash],
     ] as const) {
       if (!hash) continue;
-      const created = await this.prisma.fraudBlock.createMany({
-        data: [{ tenantId: user.tenantId, kind, hash, responseId: r.id, note: note ?? null, createdById: user.id }],
-        skipDuplicates: true,
-      });
+      const created = await createManySkipDuplicates(this.prisma.fraudBlock, 'FraudBlock', [
+        { tenantId: user.tenantId, kind, hash, responseId: r.id, note: note ?? null, createdById: user.id },
+      ]);
       n += created.count;
     }
     if (n) await this.audit.record(user, 'fraud.block', 'response', r.id, { uid: r.uid, entries: n });
@@ -468,4 +465,23 @@ export class QualityService {
       },
     };
   }
+}
+
+/**
+ * Median duration of the survey's other real completes (as PostgreSQL's percentile_cont(0.5)), or
+ * null below MIN_COMPLETES_FOR_MEDIAN. Reads only the one or two middle rows.
+ */
+async function medianDuration(db: Db, surveyId: string, exceptId: string): Promise<number | null> {
+  const where = { surveyId, status: 'COMPLETE' as const, isTest: false, durationMs: { not: null }, id: { not: exceptId } };
+  const n = await db.response.count({ where });
+  if (n < MIN_COMPLETES_FOR_MEDIAN || n === 0) return null;
+  const mid = await db.response.findMany({
+    where,
+    orderBy: { durationMs: 'asc' },
+    skip: Math.floor((n - 1) / 2),
+    take: n % 2 ? 1 : 2,
+    select: { durationMs: true },
+  });
+  const v = mid.map((x) => Number(x.durationMs));
+  return v.length === 2 ? (v[0]! + v[1]!) / 2 : (v[0] ?? null);
 }

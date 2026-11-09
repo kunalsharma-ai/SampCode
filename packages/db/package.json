@@ -7,8 +7,8 @@
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
-    "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "migrate:dev": "dotenv -e ../../.env -- node dist/indexes.js",
+    "migrate:deploy": "dotenv -e ../../.env -- node dist/indexes.js",
     "seed": "dotenv -e ../../.env -- node dist/seed.js"
   },
   "dependencies": {

@@ -124,19 +124,31 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
 
   private async claim(): Promise<Job | null> {
     const types = this.handledTypes();
-    const [job] = await this.prisma.$queryRaw<Job[]>`
-      UPDATE "Job" SET status = 'RUNNING', attempts = attempts + 1, "lockedUntil" = now() + (${LEASE_MS} * interval '1 millisecond'),
-        "startedAt" = COALESCE("startedAt", now()), "progressNote" = 'Started', "updatedAt" = now()
-      WHERE id = (
-        SELECT id FROM "Job"
-        WHERE ((status = 'QUEUED' AND "runAfter" <= now()) OR (status = 'RUNNING' AND "lockedUntil" < now()))
-          AND "type" = ANY(${types})
-        ORDER BY "runAfter" ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *`;
-    return job ?? null;
+    // One job at a time: take the oldest due one, and only if no other worker took it first.
+    for (let tries = 0; tries < 5; tries++) {
+      const now = new Date();
+      const due: Prisma.JobWhereInput = {
+        type: { in: types },
+        OR: [
+          { status: 'QUEUED', runAfter: { lte: now } },
+          { status: 'RUNNING', lockedUntil: { lt: now } },
+        ],
+      };
+      const next = await this.prisma.job.findFirst({ where: due, orderBy: { runAfter: 'asc' } });
+      if (!next) return null;
+      const taken = await this.prisma.job.updateMany({
+        where: { AND: [due, { id: next.id, attempts: next.attempts }] },
+        data: {
+          status: 'RUNNING',
+          attempts: { increment: 1 },
+          lockedUntil: new Date(now.getTime() + LEASE_MS),
+          startedAt: next.startedAt ?? now,
+          progressNote: 'Started',
+        },
+      });
+      if (taken.count === 1) return this.prisma.job.findUnique({ where: { id: next.id } });
+    }
+    return null;
   }
 
   private async finish(job: Job, data: Prisma.JobUpdateInput) {

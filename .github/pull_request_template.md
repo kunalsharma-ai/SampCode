@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] Database changes come with a migration, and tenant isolation is kept (`tenantId` on every query)
+- [ ] Database changes keep the indexes in `schema.prisma` (`pnpm db:migrate`), and tenant isolation is kept (`tenantId` on every query)
 - [ ] New endpoints validate input and check roles
 - [ ] Secrets and model ids come from configuration, not code
 - [ ] Docs or an ADR updated if a module boundary or contract changed

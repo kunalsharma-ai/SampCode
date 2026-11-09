@@ -34,8 +34,13 @@ export async function takeQuotaPlaces(
   for (const slot of slots) {
     let taken: string | null = null;
     for (const q of slot) {
-      const n = await tx.$executeRaw`UPDATE "QuotaCount" SET "count" = "count" + 1
-        WHERE "surveyId" = ${surveyId} AND "quotaId" = ${q.id} AND "count" < COALESCE("targetOverride", ${q.target})`;
+      // Take a place only while the cell is under its target. The update is guarded on the count
+      // just read; a concurrent take makes the transaction conflict and run again.
+      const c = await tx.quotaCount.findUnique({ where: { surveyId_quotaId: { surveyId, quotaId: q.id } } });
+      const n =
+        c && c.count < (c.targetOverride ?? q.target)
+          ? (await tx.quotaCount.updateMany({ where: { id: c.id, count: c.count }, data: { count: { increment: 1 } } })).count
+          : 0;
       if (n > 0) {
         taken = q.id;
         break;
@@ -76,5 +81,5 @@ export async function releaseQuotaPlaces(
 ) {
   const ids = r.quotaCells.length ? r.quotaCells : matchingQuotas(def, (r.answers ?? {}) as Answers).map((q) => q.id);
   for (const id of ids)
-    await tx.$executeRaw`UPDATE "QuotaCount" SET "count" = "count" - 1 WHERE "surveyId" = ${surveyId} AND "quotaId" = ${id} AND "count" > 0`;
+    await tx.quotaCount.updateMany({ where: { surveyId, quotaId: id, count: { gt: 0 } }, data: { count: { decrement: 1 } } });
 }

@@ -33,6 +33,10 @@ const RULES = [
     re: /\bpostgres(?:ql)?:\/\/[^:\s/'"]+:(?!zapx@|password@|postgres@|\$\{|\$)[^@\s'"]{6,}@(?!localhost|127\.0\.0\.1|postgres[:/])/,
   },
   {
+    name: 'MongoDB URL with a password',
+    re: /\bmongodb(?:\+srv)?:\/\/[^:\s/'"]+:(?!zapx@|password@|\$\{|\$)[^@\s'"]{6,}@(?!localhost|127\.0\.0\.1|mongo[:/])/,
+  },
+  {
     name: 'Secret assigned in a settings file',
     re: /^\s*(?:export\s+)?(?:JWT_SECRET|SECRETS_KEY|EDGE_SHARED_SECRET|[A-Z_]*(?:API_KEY|AUTH_TOKEN|SECRET_KEY|WEBHOOK_SECRET|PASSWORD))\s*=\s*['"]?(?!dev-only|change-?me|test|example|xxx|\$\{|<)[^\s'"#]{12,}/,
     files: /(^|\/)\.env(\.|$)|\.(sh|tfvars|ya?ml|toml|ini|conf)$/,

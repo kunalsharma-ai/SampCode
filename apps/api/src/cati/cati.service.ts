@@ -9,6 +9,7 @@ import { config } from '../config';
 import { integration } from '../platform/integrations';
 import type { AuthUser } from '../auth/auth.types';
 import { hhmm, isTimeZone, phoneHash, withinHours, type CallingHours } from './calling-rules';
+import { createManySkipDuplicates } from '../common/mongo-compat';
 
 /** How long an interviewer holds a case before it goes back to the queue. */
 export const CASE_LEASE_MS = 30 * 60_000;
@@ -122,7 +123,7 @@ export class CatiService {
       skipped.push({ row: cases.findIndex((c) => c.code?.trim() === r.code) + 1, code: r.code, reason: 'Already in the call list' });
       return false;
     });
-    const { count } = await this.prisma.catiCase.createMany({ data: fresh, skipDuplicates: true });
+    const { count } = await createManySkipDuplicates(this.prisma.catiCase, 'CatiCase', fresh);
     await this.audit.record(user, 'cati.cases_add', 'survey', surveyId, { added: count, skipped: skipped.length });
     return { added: count, skipped: skipped.sort((a, b) => a.row - b.row) };
   }
@@ -150,10 +151,21 @@ export class CatiService {
       select: { id: true, name: true },
     });
     const hours = await this.prisma.catiSettings.findUnique({ where: { surveyId } });
-    const [dnc] = await this.prisma.$queryRaw<Array<{ n: bigint }>>`
-      SELECT count(*) AS n FROM "CatiCase" c
-      WHERE c."surveyId" = ${surveyId} AND c.status IN ('PENDING', 'CALLBACK')
-        AND EXISTS (SELECT 1 FROM "DoNotCall" d WHERE d."tenantId" = c."tenantId" AND d."phoneHash" = c."phoneHash")`;
+    const [dnc] = (await this.prisma.catiCase.aggregateRaw({
+      pipeline: [
+        { $match: { surveyId, status: { $in: ['PENDING', 'CALLBACK'] }, phoneHash: { $type: 'string' } } },
+        {
+          $lookup: {
+            from: 'DoNotCall',
+            let: { t: '$tenantId', h: '$phoneHash' },
+            pipeline: [{ $match: { $expr: { $and: [{ $eq: ['$tenantId', '$$t'] }, { $eq: ['$phoneHash', '$$h'] }] } } }, { $limit: 1 }],
+            as: 'dnc',
+          },
+        },
+        { $match: { 'dnc.0': { $exists: true } } },
+        { $count: 'n' },
+      ],
+    })) as unknown as Array<{ n: number }>;
     return {
       cases: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
       dueNow: due,
@@ -285,27 +297,9 @@ export class CatiService {
     for (let i = 0; i < 10; i++) {
       // Due cases, callbacks first. Numbers on the do-not-call list are never offered, and cases
       // other than agreed callbacks only inside the survey's calling hours in the respondent's zone.
-      const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
-        UPDATE "CatiCase" SET status = 'IN_CALL', "lockedById" = ${user.id},
-          "lockedUntil" = now() + make_interval(secs => ${CASE_LEASE_MS / 1000}), "updatedAt" = now()
-        WHERE id = (
-          SELECT c.id FROM "CatiCase" c
-          LEFT JOIN "CatiSettings" s ON s."surveyId" = c."surveyId"
-          WHERE c."surveyId" = ${surveyId} AND c."phoneSealed" <> '' AND (
-            (c.status IN ('PENDING', 'CALLBACK') AND c."nextCallAt" <= now())
-            OR (c.status = 'IN_CALL' AND c."lockedUntil" < now()))
-          AND NOT EXISTS (SELECT 1 FROM "DoNotCall" d WHERE d."tenantId" = c."tenantId" AND d."phoneHash" = c."phoneHash")
-          AND (c.status = 'CALLBACK' OR s."surveyId" IS NULL OR (
-            EXTRACT(ISODOW FROM now() AT TIME ZONE COALESCE(c."timeZone", s."timeZone"))::int = ANY(s.days)
-            AND (EXTRACT(HOUR FROM now() AT TIME ZONE COALESCE(c."timeZone", s."timeZone")) * 60
-              + EXTRACT(MINUTE FROM now() AT TIME ZONE COALESCE(c."timeZone", s."timeZone")))::int >= s."callFrom"
-            AND (EXTRACT(HOUR FROM now() AT TIME ZONE COALESCE(c."timeZone", s."timeZone")) * 60
-              + EXTRACT(MINUTE FROM now() AT TIME ZONE COALESCE(c."timeZone", s."timeZone")))::int < s."callUntil"))
-          ORDER BY (c.status = 'CALLBACK') DESC, c."nextCallAt" ASC
-          LIMIT 1 FOR UPDATE OF c SKIP LOCKED)
-        RETURNING id`;
-      if (!rows.length) return null;
-      const c = await this.prisma.catiCase.findUniqueOrThrow({ where: { id: rows[0]!.id } });
+      const claimedId = await this.claimNext(user, surveyId);
+      if (!claimedId) return null;
+      const c = await this.prisma.catiCase.findUniqueOrThrow({ where: { id: claimedId } });
       // An interview finished after its screen was abandoned: close the case and look further.
       if (c.responseId) {
         const r = await this.prisma.response.findUnique({ where: { id: c.responseId }, select: { status: true } });
@@ -315,6 +309,63 @@ export class CatiService {
         }
       }
       return this.opened(user, c);
+    }
+    return null;
+  }
+
+  /**
+   * Claim the next due case for this interviewer: agreed callbacks first, then by nextCallAt.
+   * Numbers on the do-not-call list are skipped, and cases other than callbacks only inside the
+   * survey's calling hours in the case's own time zone (or the survey's). The claim only succeeds
+   * if the case is still due, so two interviewers never get the same case.
+   */
+  private async claimNext(user: AuthUser, surveyId: string): Promise<string | null> {
+    const now = new Date();
+    const hours = await this.prisma.catiSettings.findUnique({ where: { surveyId } });
+    const due = (status: 'CALLBACK' | 'OTHER'): Prisma.CatiCaseWhereInput =>
+      status === 'CALLBACK'
+        ? { status: 'CALLBACK', nextCallAt: { lte: now } }
+        : {
+            OR: [
+              { status: 'PENDING', nextCallAt: { lte: now } },
+              { status: 'IN_CALL', lockedUntil: { lt: now } },
+            ],
+          };
+    for (const group of ['CALLBACK', 'OTHER'] as const) {
+      const where: Prisma.CatiCaseWhereInput = { AND: [{ surveyId, phoneSealed: { not: '' } }, due(group)] };
+      let cursor: string | undefined;
+      for (let page = 0; page < 20; page++) {
+        const candidates = await this.prisma.catiCase.findMany({
+          where,
+          orderBy: [{ nextCallAt: 'asc' }, { id: 'asc' }],
+          take: 100,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+          select: { id: true, tenantId: true, phoneHash: true, timeZone: true },
+        });
+        if (!candidates.length) break;
+        cursor = candidates[candidates.length - 1]!.id;
+        const hashes = candidates.map((c) => c.phoneHash).filter((h): h is string => !!h);
+        const blocked = new Set(
+          hashes.length
+            ? (
+                await this.prisma.doNotCall.findMany({
+                  where: { tenantId: { in: [...new Set(candidates.map((c) => c.tenantId))] }, phoneHash: { in: hashes } },
+                  select: { tenantId: true, phoneHash: true },
+                })
+              ).map((d) => `${d.tenantId}:${d.phoneHash}`)
+            : [],
+        );
+        for (const c of candidates) {
+          if (c.phoneHash && blocked.has(`${c.tenantId}:${c.phoneHash}`)) continue;
+          if (group !== 'CALLBACK' && hours && !inHours(hours, now, c.timeZone ?? hours.timeZone)) continue;
+          const taken = await this.prisma.catiCase.updateMany({
+            where: { AND: [where, { id: c.id }] },
+            data: { status: 'IN_CALL', lockedById: user.id, lockedUntil: new Date(now.getTime() + CASE_LEASE_MS) },
+          });
+          if (taken.count === 1) return c.id;
+        }
+        if (candidates.length < 100) break;
+      }
     }
     return null;
   }
@@ -392,8 +443,10 @@ export class CatiService {
       }
       rows.set(phoneHash(user.tenantId, p), { hint: p.slice(-3) });
     }
-    const { count } = await this.prisma.doNotCall.createMany({
-      data: [...rows].map(([hash, r]) => ({
+    const { count } = await createManySkipDuplicates(
+      this.prisma.doNotCall,
+      'DoNotCall',
+      [...rows].map(([hash, r]) => ({
         tenantId: user.tenantId,
         phoneHash: hash,
         hint: r.hint,
@@ -401,8 +454,7 @@ export class CatiService {
         note: note?.trim().slice(0, 200) || null,
         createdById: user.id,
       })),
-      skipDuplicates: true,
-    });
+    );
     await this.audit.record(user, 'cati.dnc_add', 'tenant', user.tenantId, { added: count, invalid: invalid.length, source });
     return { added: count, alreadyListed: rows.size - count, invalid: invalid.slice(0, 20), invalidCount: invalid.length };
   }
@@ -480,12 +532,9 @@ export class CatiService {
     // The respondent asked not to be called again: every survey of the organization respects it.
     if (disposition === 'do_not_call' && c.phoneSealed) {
       const p = this.secrets.open(c.phoneSealed);
-      await this.prisma.doNotCall.createMany({
-        data: [
-          { tenantId: c.tenantId, phoneHash: phoneHash(c.tenantId, p), hint: p.slice(-3), source: 'respondent', createdById: user.id },
-        ],
-        skipDuplicates: true,
-      });
+      await createManySkipDuplicates(this.prisma.doNotCall, 'DoNotCall', [
+        { tenantId: c.tenantId, phoneHash: phoneHash(c.tenantId, p), hint: p.slice(-3), source: 'respondent', createdById: user.id },
+      ]);
     }
     const [, updated] = await this.prisma.$transaction([
       this.prisma.catiCall.create({
@@ -522,5 +571,14 @@ export class CatiService {
       where: { id: c.id },
       data: { status: 'DONE', closedReason: outcome, lastDisposition: 'interviewed', lockedById: null, lockedUntil: null },
     });
+  }
+}
+
+/** withinHours, but an unknown time zone never allows a call (PostgreSQL refused the query). */
+function inHours(h: Parameters<typeof withinHours>[0], at: Date, timeZone: string) {
+  try {
+    return withinHours(h, at, timeZone);
+  } catch {
+    return false;
   }
 }

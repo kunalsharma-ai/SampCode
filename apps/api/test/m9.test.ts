@@ -146,7 +146,9 @@ describe('calling', () => {
     // Asking again returns the case already open, not a new one.
     expect((await next(ana)).id).toBe(a.id);
     expect(
-      await prisma.auditEvent.count({ where: { action: 'cati.case_open', data: { path: ['caseId'], equals: a.id } } }),
+      (await prisma.auditEvent.findMany({ where: { action: 'cati.case_open' }, select: { data: true } })).filter(
+        (e) => (e.data as { caseId?: string } | null)?.caseId === a.id,
+      ).length,
     ).toBeGreaterThanOrEqual(2);
     // Someone else's open case cannot be touched.
     expect((await dispose(ben, a.id, { disposition: 'busy' })).status).toBe(409);
