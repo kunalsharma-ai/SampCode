@@ -70,6 +70,13 @@ describe('MongoDB in place of PostgreSQL row locks', () => {
     expect((await createManySkipDuplicates(prisma.doNotCall, 'DoNotCall', rows)).count).toBe(0);
   });
 
+  it('skips a row whose id already exists, also inside a transaction', async () => {
+    const row = { id: `evt-${run}`, type: 'test', tenantId: null };
+    expect((await createManySkipDuplicates(prisma.billingEvent, 'BillingEvent', [row, row])).count).toBe(1);
+    const again = await prisma.$transaction(async (tx) => createManySkipDuplicates(tx.billingEvent, 'BillingEvent', [row]));
+    expect(again.count).toBe(0);
+  });
+
   it('lets any number of rows leave an optional unique field empty, as PostgreSQL did', async () => {
     const surveyId = `s-${run}-contacts`;
     for (let i = 0; i < 3; i++) await prisma.contact.create({ data: { tenantId: `t-${run}`, surveyId, name: `C${i}`, fields: {} } });
