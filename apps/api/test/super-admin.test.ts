@@ -14,22 +14,18 @@ vi.hoisted(() => {
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
 import type { AddressInfo } from 'node:net';
 import { hash } from 'bcryptjs';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { FEATURE_KEYS, featureForRoute, resolveEntitlements } from '../src/super-admin/features';
 
 const run = `sa${Date.now().toString(36)}`;
 const PLAN = `t-${run}`;
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let superAdmin: Record<string, string>;
@@ -50,8 +46,7 @@ async function register(label: string) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

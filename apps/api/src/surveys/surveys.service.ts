@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, UnprocessableEntityException } from '../http/errors';
 import type { Prisma, Survey, SurveyVersion } from '@zapx/db';
 import { analyzeSurvey, translationStatus, type AnalysisReport, type TranslationStatus } from '@zapx/logic-engine';
 import {
@@ -10,11 +10,11 @@ import {
   type SchemaIssue,
   type SurveyDefinition,
 } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { WebhookService } from '../integrations/webhook.service';
-import { PlanService } from '../plans/plan.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type WebhookService } from '../integrations/webhook.service';
+import { type PlanService } from '../plans/plan.service';
 import type { AuthUser } from '../auth/auth.types';
 
 export interface CheckResult {
@@ -33,7 +33,6 @@ export interface CheckResult {
  * Survey lifecycle: one editable draft version at a time; publishing freezes it.
  * Published versions are immutable, so every response can be traced to the exact questionnaire.
  */
-@Injectable()
 export class SurveysService {
   constructor(
     private readonly prisma: PrismaService,

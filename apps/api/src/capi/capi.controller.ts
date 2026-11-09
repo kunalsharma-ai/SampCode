@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { parseBody } from '../common/validation';
-import { CapiService } from './capi.service';
+import { type CapiService } from './capi.service';
 
 const assignSchema = z.object({
   interviewerId: z.string().min(1).max(64),
@@ -76,46 +76,80 @@ const syncSchema = z.object({
 });
 
 /** Interviewer assignments, managed in the studio. */
-@Controller('surveys/:id/capi')
 export class CapiAssignmentsController {
   constructor(private readonly capi: CapiService) {}
 
-  @Get('assignments')
-  list(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  list(user: AuthUser, id: string) {
     return this.capi.assignments(user, id);
   }
 
-  @Post('assignments')
-  @Roles(...CAN_EDIT)
-  assign(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  assign(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(assignSchema, body);
     return this.capi.assign(user, id, input.interviewerId, input.target ?? null);
   }
 
-  @Delete('assignments/:assignmentId')
-  @HttpCode(204)
-  @Roles(...CAN_EDIT)
-  async unassign(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('assignmentId') assignmentId: string) {
+  async unassign(user: AuthUser, id: string, assignmentId: string) {
     await this.capi.unassign(user, id, assignmentId);
   }
 }
 
 /** The offline interviewer app's API. Interviewers only. */
-@Controller('capi')
-@Roles('INTERVIEWER')
 export class CapiAppController {
   constructor(private readonly capi: CapiService) {}
 
-  @Get('package')
-  package(@CurrentUser() user: AuthUser) {
+  package(user: AuthUser) {
     return this.capi.package(user);
   }
 
-  @Post('sync')
-  @HttpCode(200)
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  async sync(@CurrentUser() user: AuthUser, @Body() body: unknown, @Headers('user-agent') userAgent?: string) {
+  async sync(user: AuthUser, body: unknown, userAgent?: string) {
     const input = parseBody(syncSchema, body);
     return { results: await this.capi.sync(user, input.deviceId, input.interviews, userAgent) };
   }
+}
+
+/** Express routes of CapiAssignmentsController (mounted by src/http/app.ts). */
+export function capiAssignmentsControllerRoutes(r: Router, c: CapiAssignmentsController, kit: RouteKit) {
+  r.get(
+    '/api/surveys/:id/capi/assignments',
+    ...kit.route({ controller: 'CapiAssignmentsController', handler: 'list', method: 'get' }, (req) =>
+      c.list(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/capi/assignments',
+    ...kit.route({ controller: 'CapiAssignmentsController', handler: 'assign', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.assign(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.delete(
+    '/api/surveys/:id/capi/assignments/:assignmentId',
+    ...kit.route(
+      { controller: 'CapiAssignmentsController', handler: 'unassign', method: 'delete', status: 204, roles: [...CAN_EDIT] },
+      (req) => c.unassign(req.user as AuthUser, req.params.id, req.params.assignmentId),
+    ),
+  );
+}
+
+/** Express routes of CapiAppController (mounted by src/http/app.ts). */
+export function capiAppControllerRoutes(r: Router, c: CapiAppController, kit: RouteKit) {
+  r.get(
+    '/api/capi/package',
+    ...kit.route({ controller: 'CapiAppController', handler: 'package', method: 'get', roles: ['INTERVIEWER'] }, (req) =>
+      c.package(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/capi/sync',
+    ...kit.route(
+      {
+        controller: 'CapiAppController',
+        handler: 'sync',
+        method: 'post',
+        status: 200,
+        roles: ['INTERVIEWER'],
+        throttle: { limit: 60, ttl: 60_000 },
+      },
+      (req) => c.sync(req.user as AuthUser, req.body, req.headers['user-agent'] as unknown as string),
+    ),
+  );
 }

@@ -12,13 +12,9 @@ vi.hoisted(() => {
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { importTemplateRows, parseCsv } from '../src/imports/template-import';
 import { sniffMedia } from '../src/media/media.service';
 
@@ -28,7 +24,7 @@ const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42')
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(300, 2)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let admin: Record<string, string>;
 let viewer: Record<string, string>;
@@ -100,8 +96,7 @@ const definition = (img: string, vid: string) => ({
 });
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   const reg = await http

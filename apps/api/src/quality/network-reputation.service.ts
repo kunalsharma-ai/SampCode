@@ -1,24 +1,9 @@
-/**
- * Network reputation (Milestone 16): asks a provider whether a respondent's address belongs to a VPN,
- * proxy, Tor exit, privacy relay or data centre, and keeps only those words on the interview
- * (`Response.networkFlags`). The quality score turns them into the anonymous_network and
- * datacenter_network flags (review evidence, never a block at the door).
- *
- * - Off by default (NETWORK_REPUTATION=off): no address leaves SampCode.
- * - The lookup runs after the interview has started and never delays or fails it; a slow or broken
- *   provider just means no flag.
- * - Private, loopback and link-local addresses are never sent.
- * - Answers are cached in memory for an hour, keyed by a hash of the address, so a busy network is
- *   looked up once.
- *
- * Provider: IPinfo privacy detection (`GET /{ip}/privacy`). Tested against a local stand-in only.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 
 export const NETWORK_KINDS = ['vpn', 'proxy', 'tor', 'relay', 'hosting'] as const;
 export type NetworkKind = (typeof NETWORK_KINDS)[number];
@@ -74,7 +59,6 @@ const SETTLED_KEEP_MS = 10 * 60_000;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const CACHE_MAX = 10_000;
 
-@Injectable()
 export class NetworkReputationService {
   private readonly log = new Logger('NetworkReputation');
   private readonly cache = new Map<string, { kinds: NetworkKind[]; at: number }>();

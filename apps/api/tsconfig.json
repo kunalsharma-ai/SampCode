@@ -4,8 +4,6 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "dist",
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "noUncheckedIndexedAccess": false,
     "declaration": false,
     "types": ["node"]

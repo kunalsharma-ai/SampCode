@@ -1,48 +1,28 @@
-import {
-  BadRequestException,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  Param,
-  Post,
-  Req,
-  Res,
-  UploadedFile as UploadedFileParam,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { SkipThrottle } from '@nestjs/throttler';
+import { BadRequestException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request, Response } from 'express';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Public, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import type { UploadedFile } from '../imports/documents';
 import { config } from '../config';
-import { MediaService } from './media.service';
+import { type MediaService } from './media.service';
 import { sendBytes } from '../common/send-bytes';
 
 /** Media library of a survey (Milestone 11). */
-@Controller()
 export class MediaController {
   constructor(private readonly media: MediaService) {}
 
-  @Get('surveys/:id/media')
-  list(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  list(user: AuthUser, id: string) {
     return this.media.list(user, id);
   }
 
-  @Post('surveys/:id/media')
-  @Roles(...CAN_EDIT)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: config().MEDIA_MAX_MB * 1024 * 1024, files: 1, fields: 5 } }))
-  upload(@CurrentUser() user: AuthUser, @Param('id') id: string, @UploadedFileParam() file?: UploadedFile) {
+  upload(user: AuthUser, id: string, file?: UploadedFile) {
     if (!file) throw new BadRequestException('Attach a file');
     return this.media.upload(user, id, file.originalname, file.buffer);
   }
 
-  @Delete('media/:id')
-  @Roles(...CAN_EDIT)
-  @HttpCode(204)
-  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  remove(user: AuthUser, id: string) {
     return this.media.remove(user, id);
   }
 
@@ -51,10 +31,7 @@ export class MediaController {
    * random; files never change under an id, so they can be cached for a year. Supports byte ranges,
    * which browsers need to seek in video.
    */
-  @Public()
-  @SkipThrottle()
-  @Get('public/media/:id')
-  async serve(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async serve(id: string, req: Request, res: Response) {
     const { meta, data } = await this.media.publicFile(id);
     res.setHeader('Content-Type', meta.contentType);
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -68,4 +45,37 @@ export class MediaController {
     }
     sendBytes(req, res, data);
   }
+}
+
+/** Express routes of MediaController (mounted by src/http/app.ts). */
+export function mediaControllerRoutes(r: Router, c: MediaController, kit: RouteKit) {
+  r.get(
+    '/api/surveys/:id/media',
+    ...kit.route({ controller: 'MediaController', handler: 'list', method: 'get' }, (req) => c.list(req.user as AuthUser, req.params.id)),
+  );
+  r.post(
+    '/api/surveys/:id/media',
+    ...kit.route(
+      {
+        controller: 'MediaController',
+        handler: 'upload',
+        method: 'post',
+        roles: [...CAN_EDIT],
+        upload: { field: 'file', ...{ limits: { fileSize: config().MEDIA_MAX_MB * 1024 * 1024, files: 1, fields: 5 } } },
+      },
+      (req) => c.upload(req.user as AuthUser, req.params.id, req.file as unknown as UploadedFile),
+    ),
+  );
+  r.delete(
+    '/api/media/:id',
+    ...kit.route({ controller: 'MediaController', handler: 'remove', method: 'delete', status: 204, roles: [...CAN_EDIT] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/public/media/:id',
+    ...kit.route({ controller: 'MediaController', handler: 'serve', method: 'get', public: true, throttle: false, raw: true }, (req, res) =>
+      c.serve(req.params.id, req, res),
+    ),
+  );
 }

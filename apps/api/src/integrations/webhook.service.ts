@@ -1,19 +1,11 @@
-/**
- * Outbound webhooks (Milestone 6): an outbox of signed JSON events, delivered by the same
- * background worker as vendor callbacks, with the same retry policy and SSRF protection.
- *
- * Payloads describe what happened (ids, statuses, scores), never respondents' answers. Test
- * responses never produce events. emit() never throws: a webhook problem must not affect an
- * interview or a studio action.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import { randomUUID } from 'node:crypto';
 import type { Prisma, WebhookDelivery } from '@zapx/db';
 import { DEFAULT_RETRY_POLICY, retryDelayMs, type RedirectStatus } from '@zapx/redirect-core';
-import { PrismaService } from '../common/prisma.service';
-import { SecretBox } from '../platform/secret-box';
-import { HttpDelivery } from './http-delivery';
-import { AutomationQueue } from '../automation/automation.queue';
+import { type PrismaService } from '../common/prisma.service';
+import { type SecretBox } from '../platform/secret-box';
+import { type HttpDelivery } from './http-delivery';
+import { type AutomationQueue } from '../automation/automation.queue';
 import { SIGNATURE_HEADER, signWebhook } from './webhook-signing';
 import { claim } from '../common/mongo-compat';
 
@@ -40,7 +32,6 @@ export interface WebhookRun {
   dead: number;
 }
 
-@Injectable()
 export class WebhookService {
   private readonly log = new Logger('Webhooks');
 

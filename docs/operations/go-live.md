@@ -1,26 +1,29 @@
 # Going live: what needs a person with the accounts
 
 Everything in SampCode that could be built and tested without real accounts is done and merged into
-`main`: milestones 1 to 20 and PRs #27 to #46 (the design system, the blueprint phases, the handbook,
+`main`: milestones 1 to 20 and PRs #27 to #59 (the design system, the blueprint phases, the handbook,
 the security fixes, webcam eye tracking, integrations in the CRM, the super admin console, the mobile
-app and Node 26). The only open pull request is #47 (SampAudience). The steps below need credentials, accounts or
+app, Node 26, SampAudience and MongoDB, ADR 0040). PRs #58, #60 and #61 finish the move to **Express and
+MongoDB** (Atlas on AWS, plain Express, ADR 0041, docs) and are waiting for review. The steps below need credentials, accounts or
 decisions that only the owner has. Do them on a **staging** stack first, in this order; each links to
 the guide with the details.
 
-| #   | Step                                                                                                          | Needs                                    | Guide                                                        |
-| --- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------ |
-| 1   | Done: every PR through #46 is merged ([merge-order.md](merge-order.md)); review #47 (SampAudience) separately | GitHub                                   | [merge-order.md](merge-order.md)                             |
-| 2   | Create the Terraform state bucket, ACM certificates (one in us-east-1) and DNS validation                     | AWS account, DNS for the domains         | [infra/terraform/README.md](../../infra/terraform/README.md) |
-| 3   | `terraform apply` with `waf_mode = "count"`, then put the app secret JSON in Secrets Manager                  | AWS                                      | same                                                         |
-| 4   | First release: `ENVIRONMENT=staging infra/scripts/deploy-aws.sh` (Docker and the AWS CLI on the PC)           | AWS                                      | same                                                         |
-| 5   | Create the first organization (temporary `ALLOW_SIGNUP = "true"`, then remove it)                             | —                                        | same                                                         |
-| 6   | In the CRM, **Settings → Integrations**: connect Claude, then IPinfo, Deepgram, Twilio, Stripe as needed      | The provider accounts                    | [below](#integrations-are-set-up-in-the-crm)                 |
-| 7   | Run `scripts/projexa-check.mjs` against the deployed PROJEXA                                                  | A deployed PROJEXA and its client keys   | [redirects.md](../modules/redirects.md)                      |
-| 8   | Connect your real identity provider (OpenID Connect or SAML) and, if wanted, SCIM, in Settings                | IdP admin (Entra ID, Okta, Google)       | [sso-scim-plans.md](../modules/sso-scim-plans.md)            |
-| 9   | Read a week of WAF logs from real fieldwork, then set `waf_mode = "block"`                                    | AWS                                      | [infra/terraform/README.md](../../infra/terraform/README.md) |
-| 10  | Restore test: restore the database and a file from AWS Backup into a scratch stack                            | AWS                                      | [database.md](database.md)                                   |
-| 11  | Production stack: repeat 2 to 6 with `environment = "production"` and `db_multi_az = true`                    | AWS                                      | same                                                         |
-| 12  | Mobile app: Expo account, Google Play Console and Apple Developer accounts, then build and submit             | Store accounts, privacy and support URLs | [mobile-release.md](mobile-release.md)                       |
+| #   | Step                                                                                                                                                                                | Needs                                      | Guide                                                                            |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------- |
+| 1   | Review and merge the Express and MongoDB stack in order: #58 (Atlas), #60 (Express), #61 (docs)                                                                                     | GitHub                                     | [merge-order.md](merge-order.md)                                                 |
+| 2   | Create the Terraform state bucket, ACM certificates (one in us-east-1) and DNS validation                                                                                           | AWS account, DNS for the domains           | [infra/terraform/README.md](../../infra/terraform/README.md)                     |
+| 2b  | MongoDB Atlas: an organization on a paid tier, its id in `atlas_org_id`, an organization API key exported as `MONGODB_ATLAS_PUBLIC_KEY` / `MONGODB_ATLAS_PRIVATE_KEY` for Terraform | MongoDB Atlas account (or AWS Marketplace) | same                                                                             |
+| 3   | `terraform apply` with `waf_mode = "count"` (creates the Atlas cluster, PrivateLink and database user too), then put the app secret JSON in Secrets Manager                         | AWS, Atlas                                 | same                                                                             |
+| 4   | First release: `ENVIRONMENT=staging infra/scripts/deploy-aws.sh` (Docker and the AWS CLI on the PC)                                                                                 | AWS                                        | same                                                                             |
+| 5   | Create the first organization (temporary `ALLOW_SIGNUP = "true"`, then remove it)                                                                                                   | —                                          | same                                                                             |
+| 6   | In the CRM, **Settings → Integrations**: connect Claude, then IPinfo, Deepgram, Twilio, Stripe as needed                                                                            | The provider accounts                      | [below](#integrations-are-set-up-in-the-crm)                                     |
+| 7   | Run `scripts/projexa-check.mjs` against the deployed PROJEXA                                                                                                                        | A deployed PROJEXA and its client keys     | [redirects.md](../modules/redirects.md)                                          |
+| 8   | Connect your real identity provider (OpenID Connect or SAML) and, if wanted, SCIM, in Settings                                                                                      | IdP admin (Entra ID, Okta, Google)         | [sso-scim-plans.md](../modules/sso-scim-plans.md)                                |
+| 9   | Read a week of WAF logs from real fieldwork, then set `waf_mode = "block"`                                                                                                          | AWS                                        | [infra/terraform/README.md](../../infra/terraform/README.md)                     |
+| 10  | Restore test: restore an Atlas snapshot into a new cluster and a file from AWS Backup, into a scratch stack                                                                         | AWS, Atlas                                 | [database.md](database.md)                                                       |
+| 10b | Only if a PostgreSQL installation already holds real data: copy it with `copy-from-postgres` during a short stop                                                                    | the old database URL                       | [database.md](database.md#moving-an-existing-postgresql-installation-to-mongodb) |
+| 11  | Production stack: repeat 2 to 6 with `environment = "production"` (Atlas `db_instance_size = "M20"` or larger)                                                                      | AWS, Atlas                                 | same                                                                             |
+| 12  | Mobile app: Expo account, Google Play Console and Apple Developer accounts, then build and submit                                                                                   | Store accounts, privacy and support URLs   | [mobile-release.md](mobile-release.md)                                           |
 
 ## Integrations are set up in the CRM
 
@@ -65,10 +68,11 @@ when the stack is deployed (steps 2 to 4) and rarely again:
 - **Master keys:** `JWT_SECRET` (sign-in sessions), `SECRETS_KEY` (encrypts every key saved in
   the CRM) and `SIGNING_KEYS_SECRET` (test links, network and device hashes, SSO state; required in
   production). Changing `SECRETS_KEY` means entering the integration keys again.
-- **Database:** `DATABASE_URL`, or the RDS parts Terraform passes in.
+- **Database:** `DATABASE_URL`, or the parts Terraform passes in (`DB_HOST` from the Atlas private
+  endpoint, `DB_USER` and `DB_PASSWORD` from the `zapx-<env>/database` secret).
 - **Addresses and HTTPS:** `STUDIO_URL`, `RUNTIME_BASE_URL`, `CAPI_APP_URL`, `COOKIE_SECURE`, DNS and
   certificates.
-- **AWS resources (Terraform):** servers, load balancer, CloudFront, WAF, backups, the KMS key and the
+- **AWS and Atlas resources (Terraform):** servers, load balancer, CloudFront, WAF, the Atlas cluster and backups, the KMS key and the
   S3 bucket itself, and the IAM role that lets the servers use that bucket.
 - **Edge and proxies:** `EDGE_SHARED_SECRET`, `TRUST_PROXY_HOPS`, `GEO_COUNTRY_HEADER`.
 - **Where work runs:** `JOB_WORKER`, `CALLBACK_WORKER` and the worker service; size limits and
@@ -87,6 +91,11 @@ These parts were tested only against stand-ins, so they are the most likely to n
   from a private window, with an administrator keeping a password.
 - **Stripe** (tested against a fake Stripe): one Checkout in test mode, one cancellation in the
   portal, and the webhook log in the Stripe dashboard showing 200 answers.
+- **MongoDB Atlas** (new with #58, plan-tested with a mocked provider; `terraform validate` with the real
+  `mongodbatlas` provider still to run): the PrivateLink endpoint (the API's health check fails until it
+  is available), the database user's access, and one restore into a new cluster.
+- **Express** (#60): the API answers exactly as before in all 348 API and 30 browser tests; on staging,
+  watch the API log for `ExceptionsHandler` lines after the first day of real use.
 - **Terraform** (validated and plan-tested with a mocked provider): the first apply. AWS Backup of
   the files bucket and the KMS key permissions it needs are the parts most likely to need a fix.
 - **WAF** (count mode first): CAPI sync, large exports and question text with HTML are the likely

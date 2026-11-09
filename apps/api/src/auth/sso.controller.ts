@@ -1,15 +1,15 @@
-import { Body, Controller, Get, HttpCode, Post, Put, Query, Req, Res } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { Throttle } from '@nestjs/throttler';
+import { type JwtService } from '../http/jwt';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from './auth.types';
-import { CurrentUser, Public, Roles } from './decorators';
+
 import { issueSession } from './session';
-import { SsoError, SsoService } from './sso.service';
-import { SamlService } from './saml.service';
+import { SsoError, type SsoService } from './sso.service';
+import { type SamlService } from './saml.service';
 
 const SSO_COOKIE = 'zapx_sso';
 const SSO_COOKIE_PATH = '/api/auth/sso';
@@ -33,7 +33,6 @@ const configSchema = z.object({
 });
 
 /** OpenID Connect single sign-on: the login flow (public) and the organization's settings (admins). */
-@Controller()
 export class SsoController {
   constructor(
     private readonly sso: SsoService,
@@ -42,11 +41,7 @@ export class SsoController {
   ) {}
 
   /** Step 1: the person typed their work email. Answers with the provider URL to send the browser to. */
-  @Public()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @Post('auth/sso/start')
-  @HttpCode(200)
-  async start(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+  async start(body: unknown, res: Response) {
     const { email, next } = parseBody(startSchema, body);
     const { url, cookie, maxAgeMs } = await this.sso.begin(email, next);
     // OpenID Connect keeps its state in a cookie; SAML keeps the request on the server (see SamlService).
@@ -62,17 +57,12 @@ export class SsoController {
   }
 
   /** SAML service provider metadata (Milestone 13): import it in the identity provider. */
-  @Public()
-  @Get('auth/sso/saml/metadata')
-  metadata(@Res() res: Response) {
+  metadata(res: Response) {
     res.type('application/samlmetadata+xml').send(this.saml.metadata());
   }
 
   /** SAML Assertion Consumer Service: the identity provider posts the response here. */
-  @Public()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Post('auth/sso/saml/acs')
-  async acs(@Body() body: Record<string, unknown>, @Res() res: Response) {
+  async acs(body: Record<string, unknown>, res: Response) {
     try {
       const { user, next } = await this.sso.completeSaml(body ?? {});
       await issueSession(this.jwt, res, user);
@@ -86,10 +76,7 @@ export class SsoController {
   }
 
   /** Step 2: the provider sends the browser back here with a code. Ends on a studio page either way. */
-  @Public()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Get('auth/sso/callback')
-  async callback(@Query() query: Record<string, string>, @Req() req: Request, @Res() res: Response) {
+  async callback(query: Record<string, string>, req: Request, res: Response) {
     const cookie = (req.cookies as Record<string, string> | undefined)?.[SSO_COOKIE];
     res.clearCookie(SSO_COOKIE, { path: SSO_COOKIE_PATH });
     try {
@@ -103,15 +90,52 @@ export class SsoController {
     }
   }
 
-  @Get('sso')
-  @Roles('ADMIN')
-  get(@CurrentUser() user: AuthUser) {
+  get(user: AuthUser) {
     return this.sso.getConfig(user.tenantId);
   }
 
-  @Put('sso')
-  @Roles('ADMIN')
-  save(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  save(user: AuthUser, body: unknown) {
     return this.sso.saveConfig(user, parseBody(configSchema, body));
   }
+}
+
+/** Express routes of SsoController (mounted by src/http/app.ts). */
+export function ssoControllerRoutes(r: Router, c: SsoController, kit: RouteKit) {
+  r.post(
+    '/api/auth/sso/start',
+    ...kit.route(
+      { controller: 'SsoController', handler: 'start', method: 'post', status: 200, public: true, throttle: { limit: 20, ttl: 60_000 } },
+      (req, res) => c.start(req.body, res),
+    ),
+  );
+  r.get(
+    '/api/auth/sso/saml/metadata',
+    ...kit.route({ controller: 'SsoController', handler: 'metadata', method: 'get', public: true, raw: true }, (req, res) =>
+      c.metadata(res),
+    ),
+  );
+  r.post(
+    '/api/auth/sso/saml/acs',
+    ...kit.route(
+      { controller: 'SsoController', handler: 'acs', method: 'post', public: true, throttle: { limit: 30, ttl: 60_000 }, raw: true },
+      (req, res) => c.acs(req.body as unknown as Record<string, unknown>, res),
+    ),
+  );
+  r.get(
+    '/api/auth/sso/callback',
+    ...kit.route(
+      { controller: 'SsoController', handler: 'callback', method: 'get', public: true, throttle: { limit: 30, ttl: 60_000 }, raw: true },
+      (req, res) => c.callback(req.query as unknown as Record<string, string>, req, res),
+    ),
+  );
+  r.get(
+    '/api/sso',
+    ...kit.route({ controller: 'SsoController', handler: 'get', method: 'get', roles: ['ADMIN'] }, (req) => c.get(req.user as AuthUser)),
+  );
+  r.put(
+    '/api/sso',
+    ...kit.route({ controller: 'SsoController', handler: 'save', method: 'put', roles: ['ADMIN'] }, (req) =>
+      c.save(req.user as AuthUser, req.body),
+    ),
+  );
 }

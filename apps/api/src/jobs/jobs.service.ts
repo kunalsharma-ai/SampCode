@@ -1,9 +1,9 @@
-import { ConflictException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '../http/errors';
 import type { Job, Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
-import { SurveysService } from '../surveys/surveys.service';
+import { type SurveysService } from '../surveys/surveys.service';
 
 export const JOB_TYPES = ['export', 'qa_run', 'ai_propose', 'transcribe'] as const;
 export type JobType = (typeof JOB_TYPES)[number];
@@ -29,7 +29,6 @@ export function presentJob(j: Job) {
 }
 
 /** Background jobs (Milestone 7): queue, read and cancel. The JobWorker runs them. */
-@Injectable()
 export class JobsService {
   constructor(
     private readonly prisma: PrismaService,

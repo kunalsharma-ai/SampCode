@@ -1,10 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, PayloadTooLargeException } from '../http/errors';
 import { createHash, randomBytes } from 'node:crypto';
 import { mediaIdsOf, type MediaKind, type SurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { SurveysService } from '../surveys/surveys.service';
-import { FileStore } from '../jobs/file-store';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type SurveysService } from '../surveys/surveys.service';
+import { type FileStore } from '../jobs/file-store';
 import { config } from '../config';
 import type { AuthUser } from '../auth/auth.types';
 
@@ -37,7 +37,6 @@ export function sniffMedia(b: Buffer): { kind: MediaKind; contentType: string } 
 }
 
 /** Media files for surveys: uploaded in the studio, served to respondents by unguessable id. */
-@Injectable()
 export class MediaService {
   constructor(
     private readonly prisma: PrismaService,

@@ -1,25 +1,13 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  Param,
-  Post,
-  Put,
-  Query,
-  UploadedFile as UploadedFileParam,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { BadRequestException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import { parseCsv } from '../imports/template-import';
 import type { UploadedFile } from '../imports/documents';
-import { CatiService, DISPOSITIONS, type CaseInput, type Disposition } from './cati.service';
+import { type CatiService, DISPOSITIONS, type CaseInput, type Disposition } from './cati.service';
 
 const CALLERS = ['ADMIN', 'PROGRAMMER', 'INTERVIEWER'] as const;
 const MAX_CASES = 20_000;
@@ -101,137 +89,88 @@ export function casesFromCsv(text: string): CaseInput[] {
 }
 
 /** CATI (Milestone 9): call lists for programmers, and the calling queue for interviewers. */
-@Controller()
 export class CatiController {
   constructor(private readonly cati: CatiService) {}
 
   // ---- Programmers ----
 
-  @Post('surveys/:id/cati/cases')
-  @Roles(...CAN_EDIT)
-  add(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  add(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(casesSchema, body);
     return this.cati.addCases(user, id, input.cases, input.maxAttempts);
   }
 
-  @Post('surveys/:id/cati/cases/upload')
-  @Roles(...CAN_EDIT)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 5 } }))
-  upload(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Body() body: { maxAttempts?: string },
-    @UploadedFileParam() file?: UploadedFile,
-  ) {
+  upload(user: AuthUser, id: string, body: { maxAttempts?: string }, file?: UploadedFile) {
     if (!file) throw new BadRequestException('Attach a CSV file');
     const maxAttempts = Math.min(20, Math.max(1, Number(body?.maxAttempts) || 6));
     return this.cati.addCases(user, id, casesFromCsv(file.buffer.toString('utf8')), maxAttempts);
   }
 
-  @Get('surveys/:id/cati/summary')
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  summary(user: AuthUser, id: string) {
     return this.cati.summary(user, id);
   }
 
-  @Get('surveys/:id/cati/cases')
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  list(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('status') status?: string) {
+  list(user: AuthUser, id: string, status?: string) {
     if (status && !['PENDING', 'CALLBACK', 'IN_CALL', 'DONE', 'CLOSED'].includes(status)) throw new BadRequestException('Unknown status');
     return this.cati.listCases(user, id, status);
   }
 
-  @Post('cati/cases/:id/reopen')
-  @Roles(...CAN_EDIT)
-  reopen(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  reopen(user: AuthUser, id: string) {
     return this.cati.reopen(user, id);
   }
 
-  @Post('surveys/:id/cati/erase-phones')
-  @Roles('ADMIN')
-  @HttpCode(200)
-  erase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  erase(user: AuthUser, id: string) {
     return this.cati.erasePhones(user, id);
   }
 
   // ---- Calling hours and the do-not-call list (Milestone 18) ----
 
-  @Get('surveys/:id/cati/hours')
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  hours(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  hours(user: AuthUser, id: string) {
     return this.cati.hours(user, id);
   }
 
-  @Put('surveys/:id/cati/hours')
-  @Roles(...CAN_EDIT)
-  setHours(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  setHours(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(hoursSchema, body);
     return this.cati.setHours(user, id, 'clear' in input ? null : input);
   }
 
-  @Get('cati/do-not-call')
-  @Roles(...CAN_EDIT)
-  dnc(@CurrentUser() user: AuthUser) {
+  dnc(user: AuthUser) {
     return this.cati.doNotCall(user);
   }
 
-  @Post('cati/do-not-call')
-  @Roles(...CAN_EDIT)
-  @HttpCode(200)
-  addDnc(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  addDnc(user: AuthUser, body: unknown) {
     const input = parseBody(dncSchema, body);
     return this.cati.addDoNotCall(user, input.phones, 'manual', input.note);
   }
 
-  @Post('cati/do-not-call/upload')
-  @Roles(...CAN_EDIT)
-  @HttpCode(200)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 2 } }))
-  uploadDnc(@CurrentUser() user: AuthUser, @UploadedFileParam() file?: UploadedFile) {
+  uploadDnc(user: AuthUser, file?: UploadedFile) {
     if (!file) throw new BadRequestException('Attach a CSV file');
     return this.cati.addDoNotCall(user, phonesFromCsv(file.buffer.toString('utf8')), 'upload');
   }
 
   /** Taking a number off the list is an administrator's decision (the person may have asked twice). */
-  @Delete('cati/do-not-call/:id')
-  @Roles('ADMIN')
-  @HttpCode(204)
-  removeDnc(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  removeDnc(user: AuthUser, id: string) {
     return this.cati.removeDoNotCall(user, id);
   }
 
   // ---- Interviewers (and admins or programmers who make calls) ----
 
-  @Get('cati/dispositions')
-  @Roles(...CALLERS)
   dispositions() {
     return Object.entries(DISPOSITIONS).map(([code, d]) => ({ code, label: d.label }));
   }
 
-  @Get('cati/surveys')
-  @Roles(...CALLERS)
-  surveys(@CurrentUser() user: AuthUser) {
+  surveys(user: AuthUser) {
     return this.cati.mySurveys(user);
   }
 
-  @Post('cati/surveys/:id/next')
-  @Roles(...CALLERS)
-  @HttpCode(200)
-  async next(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async next(user: AuthUser, id: string) {
     return { case: await this.cati.next(user, id) };
   }
 
-  @Post('cati/cases/:id/interview')
-  @Roles(...CALLERS)
-  @HttpCode(200)
-  interview(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  interview(user: AuthUser, id: string) {
     return this.cati.interview(user, id);
   }
 
-  @Post('cati/cases/:id/disposition')
-  @Roles(...CALLERS)
-  @HttpCode(200)
-  dispose(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  dispose(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(disposeSchema, body);
     const now = Date.now();
     const opened =
@@ -239,10 +178,133 @@ export class CatiController {
     return this.cati.dispose(user, id, input, opened);
   }
 
-  @Post('cati/cases/:id/release')
-  @Roles(...CALLERS)
-  @HttpCode(204)
-  release(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  release(user: AuthUser, id: string) {
     return this.cati.release(user, id);
   }
+}
+
+/** Express routes of CatiController (mounted by src/http/app.ts). */
+export function catiControllerRoutes(r: Router, c: CatiController, kit: RouteKit) {
+  r.post(
+    '/api/surveys/:id/cati/cases',
+    ...kit.route({ controller: 'CatiController', handler: 'add', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.add(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/cati/cases/upload',
+    ...kit.route(
+      {
+        controller: 'CatiController',
+        handler: 'upload',
+        method: 'post',
+        roles: [...CAN_EDIT],
+        upload: { field: 'file', ...{ limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 5 } } },
+      },
+      (req) =>
+        c.upload(req.user as AuthUser, req.params.id, req.body as unknown as { maxAttempts?: string }, req.file as unknown as UploadedFile),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/cati/summary',
+    ...kit.route({ controller: 'CatiController', handler: 'summary', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] }, (req) =>
+      c.summary(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/cati/cases',
+    ...kit.route({ controller: 'CatiController', handler: 'list', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] }, (req) =>
+      c.list(req.user as AuthUser, req.params.id, req.query.status as string),
+    ),
+  );
+  r.post(
+    '/api/cati/cases/:id/reopen',
+    ...kit.route({ controller: 'CatiController', handler: 'reopen', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.reopen(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/cati/erase-phones',
+    ...kit.route({ controller: 'CatiController', handler: 'erase', method: 'post', status: 200, roles: ['ADMIN'] }, (req) =>
+      c.erase(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/cati/hours',
+    ...kit.route({ controller: 'CatiController', handler: 'hours', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] }, (req) =>
+      c.hours(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/cati/hours',
+    ...kit.route({ controller: 'CatiController', handler: 'setHours', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.setHours(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/cati/do-not-call',
+    ...kit.route({ controller: 'CatiController', handler: 'dnc', method: 'get', roles: [...CAN_EDIT] }, (req) =>
+      c.dnc(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/cati/do-not-call',
+    ...kit.route({ controller: 'CatiController', handler: 'addDnc', method: 'post', status: 200, roles: [...CAN_EDIT] }, (req) =>
+      c.addDnc(req.user as AuthUser, req.body),
+    ),
+  );
+  r.post(
+    '/api/cati/do-not-call/upload',
+    ...kit.route(
+      {
+        controller: 'CatiController',
+        handler: 'uploadDnc',
+        method: 'post',
+        status: 200,
+        roles: [...CAN_EDIT],
+        upload: { field: 'file', ...{ limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 2 } } },
+      },
+      (req) => c.uploadDnc(req.user as AuthUser, req.file as unknown as UploadedFile),
+    ),
+  );
+  r.delete(
+    '/api/cati/do-not-call/:id',
+    ...kit.route({ controller: 'CatiController', handler: 'removeDnc', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.removeDnc(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/cati/dispositions',
+    ...kit.route({ controller: 'CatiController', handler: 'dispositions', method: 'get', roles: [...CALLERS] }, () => c.dispositions()),
+  );
+  r.get(
+    '/api/cati/surveys',
+    ...kit.route({ controller: 'CatiController', handler: 'surveys', method: 'get', roles: [...CALLERS] }, (req) =>
+      c.surveys(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/cati/surveys/:id/next',
+    ...kit.route({ controller: 'CatiController', handler: 'next', method: 'post', status: 200, roles: [...CALLERS] }, (req) =>
+      c.next(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/cati/cases/:id/interview',
+    ...kit.route({ controller: 'CatiController', handler: 'interview', method: 'post', status: 200, roles: [...CALLERS] }, (req) =>
+      c.interview(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/cati/cases/:id/disposition',
+    ...kit.route({ controller: 'CatiController', handler: 'dispose', method: 'post', status: 200, roles: [...CALLERS] }, (req) =>
+      c.dispose(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/cati/cases/:id/release',
+    ...kit.route({ controller: 'CatiController', handler: 'release', method: 'post', status: 204, roles: [...CALLERS] }, (req) =>
+      c.release(req.user as AuthUser, req.params.id),
+    ),
+  );
 }

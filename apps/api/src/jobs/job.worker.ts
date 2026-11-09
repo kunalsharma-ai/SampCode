@@ -1,31 +1,24 @@
-/**
- * The job worker (Milestone 7): runs exports, large QA runs and AI drafts outside web requests.
- *
- * It runs in-process when JOB_WORKER=on (the default, for simple local setups) and in its own
- * process with `node dist/worker.js` (docker compose and production, with JOB_WORKER=off on the
- * API). Jobs are claimed with FOR UPDATE SKIP LOCKED and a lease that progress updates extend, so
- * several workers can run, and a job whose worker died is picked up again once its lease expires.
- * The same pass does housekeeping once an hour: expired files, old jobs, old webhook deliveries.
- */
-import { HttpException, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { HttpException } from '../http/errors';
+import { Logger } from '../http/logger';
+import type { OnApplicationBootstrap, OnModuleDestroy } from '../http/lifecycle';
 import { randomBytes } from 'node:crypto';
 import type { Job, Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { CaptureService } from '../captures/capture.service';
-import { TranscriptionError, TranscriptionService } from '../captures/transcription.service';
-import { TelephonyService } from '../cati/telephony.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type CaptureService } from '../captures/capture.service';
+import { TranscriptionError, type TranscriptionService } from '../captures/transcription.service';
+import { type TelephonyService } from '../cati/telephony.service';
 import { config } from '../config';
 import type { AuthUser } from '../auth/auth.types';
 import { AiError, type AiDocument } from '../ai/ai-provider';
-import { ProposeService } from '../ai/propose.service';
+import { type ProposeService } from '../ai/propose.service';
 import { notConfigured } from '../ai/claude.provider';
-import { ExportRunner, type ExportOptions } from '../exports/export-runner.service';
-import { QaService, type QaRunInput } from '../qa/qa.service';
-import { FilesService } from './files.service';
+import { type ExportRunner, type ExportOptions } from '../exports/export-runner.service';
+import { type QaService, type QaRunInput } from '../qa/qa.service';
+import { type FilesService } from './files.service';
 import { JOB_TYPES } from './jobs.service';
-import { DistributionService } from '../distribution/distribution.service';
-import { AutomationService } from '../automation/automation.service';
-import { GovernanceService } from '../governance/governance.service';
+import { type DistributionService } from '../distribution/distribution.service';
+import { type AutomationService } from '../automation/automation.service';
+import { type GovernanceService } from '../governance/governance.service';
 
 const LEASE_MS = 5 * 60_000;
 const RETRY_DELAY_MS = 30_000;
@@ -48,7 +41,6 @@ export interface WorkerPass {
   cancelled: number;
 }
 
-@Injectable()
 export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger('Jobs');
   private timer: NodeJS.Timeout | null = null;

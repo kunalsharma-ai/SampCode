@@ -12,16 +12,12 @@ vi.hoisted(() => {
   process.env.LOGIN_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 
 const run = `bp${Date.now().toString(36)}`;
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let admin: Record<string, string>;
 let other: Record<string, string>;
@@ -51,8 +47,7 @@ const answer = async (token: string, pageId: string, answers: Record<string, unk
   (await http.post(`/api/public/r/${token}/answers`).send({ pageId, answers }).expect(200)).body;
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   admin = await register('a');

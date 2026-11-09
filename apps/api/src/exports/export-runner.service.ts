@@ -1,13 +1,13 @@
-import { NotFoundException, PayloadTooLargeException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { NotFoundException, PayloadTooLargeException } from '../http/errors';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { config } from '../config';
 import type { AuthUser } from '../auth/auth.types';
-import { SurveysService } from '../surveys/surveys.service';
+import { type SurveysService } from '../surveys/surveys.service';
 import type { Prisma } from '@zapx/db';
 import { applyCleaning, prepareSurvey } from '@zapx/logic-engine';
 import type { Answers, SurveyDefinition } from '@zapx/survey-schema';
-import { ExportService, type ExportRow } from './export.service';
+import { type ExportService, type ExportRow } from './export.service';
 
 export interface ExportOptions {
   format: 'csv' | 'xlsx';
@@ -31,7 +31,6 @@ const PAGE = 2000;
  * Builds a data export. Used directly by the download endpoint for small surveys and by the job
  * worker for any size. Rows are read in pages through the tenant-scoped client (row-level security).
  */
-@Injectable()
 export class ExportRunner {
   constructor(
     private readonly prisma: PrismaService,

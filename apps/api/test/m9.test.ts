@@ -13,15 +13,11 @@ vi.hoisted(() => {
   process.env.RUNTIME_BASE_URL = 'http://runtime.test';
 });
 
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { casesFromCsv } from '../src/cati/cati.controller';
 import { normalizePhone } from '../src/cati/cati.service';
@@ -29,7 +25,7 @@ import { normalizePhone } from '../src/cati/cati.service';
 const demo = JSON.parse(readFileSync(join(__dirname, '../../../docs/examples/demo-screener.json'), 'utf8'));
 const run = `m9${Date.now().toString(36)}`;
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let admin: Record<string, string>;
@@ -49,8 +45,7 @@ const dispose = (who: Record<string, string>, id: string, body: Record<string, u
   http.post(`/api/cati/cases/${id}/disposition`).set(who).send(body);
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

@@ -13,19 +13,15 @@ vi.hoisted(() => {
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { formatEyeTrack, type GazeSample } from '@zapx/survey-schema';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 
 const run = `eye${Date.now().toString(36)}`;
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 7)]);
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let admin: Record<string, string>;
 let surveyId: string;
@@ -78,8 +74,7 @@ async function respond(answer: unknown, expectStatus = 200) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   const reg = await http

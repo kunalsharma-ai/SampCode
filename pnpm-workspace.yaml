@@ -9,7 +9,6 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - prisma
   - esbuild
-  - '@nestjs/core'
   - bcrypt
   - sharp
 

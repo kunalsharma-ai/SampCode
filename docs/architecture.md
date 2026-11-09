@@ -1,8 +1,12 @@
-# SampCode architecture (Milestones 1 to 20 and PRs #27–#46)
+# SampCode architecture (Milestones 1 to 20 and PRs #27–#61)
 
 The full plan, including the module map and roadmap, is in the project's
 "SampCode architecture and first milestone" document. This file records what the code does today and
 the rules every later module must follow.
+
+**Stack (2026-11-09):** the API is plain Express 5 ([ADR 0041](adr/0041-express.md)) on MongoDB through
+Prisma ([ADR 0040](adr/0040-mongodb.md)). Sections below written before that keep their history; where
+they name PostgreSQL features (row-level security, `SKIP LOCKED`), those ADRs say what replaced them.
 
 ## Core rules
 
@@ -141,7 +145,7 @@ Details: [modules/access-and-api-keys.md](modules/access-and-api-keys.md),
 ## Background jobs and files (Milestone 7)
 
 - **Job queue in the database.** Exports, QA runs above 2,000 respondents and AI drafts are queued in
-  `Job` and claimed with `SKIP LOCKED` under a renewable lease, so a crashed worker's job is picked up
+  `Job` and claimed with a conditional update under a renewable lease, so a crashed worker's job is picked up
   again. Jobs run as their creator, reloaded from the database, through the same services as the
   HTTP endpoints. [ADR 0013](adr/0013-background-jobs-and-file-storage.md)
 - **File store.** `FileStore` with a local-disk implementation; `StoredFile` keeps owner, survey,
@@ -166,7 +170,7 @@ Details: [modules/sso-scim-plans.md](modules/sso-scim-plans.md).
 
 ## Phone interviewing (Milestone 9)
 
-- **CATI call lists** with encrypted phone numbers, a shared queue (callbacks first, `SKIP LOCKED`
+- **CATI call lists** with encrypted phone numbers, a shared queue (callbacks first, conditional-update
   claims with a 30-minute lease), dispositions with retry rules and maximum attempts.
 - Interviews run on the same engine and runtime with mode `CATI`; finished interviews close their
   case automatically. Dialing is manual (`tel:` links). [ADR 0015](adr/0015-cati-call-lists.md)
@@ -202,7 +206,7 @@ Details: [modules/rich-media.md](modules/rich-media.md).
   answers), `navigator.webdriver`, a keyed device hash (`Response.deviceHash`), the edge network's
   country (`GEO_COUNTRY_HEADER`), and the organization's `FraudBlock` list.
 - **Captures** (`Capture`): photo answers and CAPI recordings, private (`GET /api/captures/:id`,
-  audited), under row-level security, in the `FileStore`. CAPI uploads files before the interview
+  audited), behind the tenant guard, in the `FileStore`. CAPI uploads files before the interview
   and the sync links them; `CAPTURE_RETENTION_DAYS` and per-survey erasure delete them.
 - **CAPI** stores the start and end location and the recording consent in `Response.location`; the
   sync checks for overlapping interviews by the same interviewer. [ADR 0018](adr/0018-fraud-detection-and-capi-capture.md)
@@ -215,7 +219,7 @@ Details: [modules/rich-media.md](modules/rich-media.md).
 - **Billing** (`BillingService`, optional): Stripe Checkout and portal; signed webhooks re-read the
   subscription and set `Tenant.plan`. [Guide](modules/billing.md)
 - **AWS** in `infra/terraform` with `infra/scripts/deploy-aws.sh`; the API builds `DATABASE_URL`
-  from the RDS secret and trusts viewer address and country only from CloudFront
+  from the database secret (MongoDB Atlas user) and trusts viewer address and country only from CloudFront
   (`EDGE_SHARED_SECRET`). [Guide](../infra/terraform/README.md)
 - **PROJEXA check** `scripts/projexa-check.mjs`. [ADR 0019](adr/0019-production-readiness.md)
 
@@ -223,7 +227,7 @@ Details: [modules/rich-media.md](modules/rich-media.md).
 
 - **AWS WAF** in front of CloudFront (runtime, CAPI app) and the load balancer (studio, API). Managed
   rules start in count mode (`waf_mode = "count"`); the per-address rate rule always blocks.
-- **Autoscaling** owns the API and studio task counts; **AWS Backup** covers RDS and the files bucket.
+- **Autoscaling** owns the API and studio task counts; Atlas backups cover the database and **AWS Backup** the files bucket.
   [ADR 0020](adr/0020-edge-protection-scaling-backups.md), [go-live checklist](operations/go-live.md)
 
 ## Weighting (Milestone 15)
@@ -283,6 +287,10 @@ Each is an interface with one first provider, off by default, tested against a l
 | #44 | Node 26 LTS, Docker `node:26-bookworm-slim` and `nginx:1.31-alpine`                                    | —                                                    |
 | #45 | Security fixes S4–S9: shared rate limits, `SIGNING_KEYS_SECRET`, script nonce, more row-level security | —                                                    |
 | #46 | Neon confirm dialogs instead of `window.confirm`                                                       | —                                                    |
+| #59 | MongoDB instead of PostgreSQL; Prisma kept                                                             | [0040](adr/0040-mongodb.md)                          |
+| #58 | MongoDB Atlas in Terraform, copy from PostgreSQL                                                       | [0040](adr/0040-mongodb.md)                          |
+| #60 | Plain Express instead of NestJS                                                                        | [0041](adr/0041-express.md)                          |
+| #61 | Docs for Express and Atlas                                                                             | —                                                    |
 
 ## Decisions, contracts and operations
 

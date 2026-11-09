@@ -34,5 +34,6 @@ day, monthly budget, redaction; this month's usage and cost.
 
 1. Subclass `AiProvider` (set `name`), implement `architect` and `translate` with structured output
    and map errors to `AiError`.
-2. Add the name to `AI_PROVIDER` in `config.ts` and a case in the factory in `app.module.ts`.
+2. Add the name to `AI_PROVIDER` in `config.ts` and a case in `DynamicAiProvider`
+   (`apps/api/src/ai/dynamic-ai.provider.ts`).
 3. Add its models to `AI_PRICING`.

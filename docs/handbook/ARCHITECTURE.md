@@ -50,7 +50,7 @@ SampCode is a survey programming, testing, hosting and fieldwork platform for ma
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Language          | TypeScript 5.8 everywhere (strict), Node.js 26 LTS                                                                                                                             |
 | Monorepo          | pnpm 10.28 workspaces (`pnpm-workspace.yaml`) and Turborepo 2.5 (`turbo.json`)                                                                                                 |
-| Backend           | NestJS 11 on Express (`apps/api`), Zod 4 for validation, `@nestjs/throttler` for rate limits, `@nestjs/jwt` for sessions                                                       |
+| Backend           | Express 5 (`apps/api`, plain routers and one composition root, ADR 0041), Zod 4 for validation, `jsonwebtoken` for sessions, rate limits in `src/http/throttle.ts`             |
 | Database          | MongoDB 7+ (replica set) through Prisma 6.10 (`packages/db`; ADR 0040)                                                                                                         |
 | Studio            | Next.js 15.5 (App Router, all pages are client components), React 19.1, CodeMirror 6, lucide-react icons, Geist fonts, plain CSS with custom properties (no Tailwind)          |
 | Runtime, CAPI app | Vite 6 + React 19 (static files served by nginx in production); CAPI uses a service worker and IndexedDB                                                                       |
@@ -92,8 +92,8 @@ flowchart LR
     C[CAPI app<br/>offline PWA :5174]
   end
   M[Mobile app<br/>Android / iOS, PR #40]
-  subgraph API["API process (NestJS, apps/api) :4000"]
-    G[Global guards:<br/>ThrottlerGuard + AuthGuard]
+  subgraph API["API process (Express, apps/api) :4000"]
+    G[Every route:<br/>rate limit + AuthGuard]
     CT[Controllers<br/>/api/...]
     SV[Services]
     W1[JobWorker<br/>in-process if JOB_WORKER=on]
@@ -120,7 +120,7 @@ flowchart LR
 
 Key points in plain language:
 
-- **One backend.** All business logic is in one NestJS process (`apps/api`), a "modular monolith":
+- **One backend.** All business logic is in one Express process (`apps/api`), a "modular monolith":
   folders are separate modules but share one database and process
   ([ADR 0001](../adr/0001-modular-monolith.md)).
 - **Three web front ends and a mobile app, no business rules in them.** The studio, runtime and CAPI app only display
@@ -147,21 +147,23 @@ Key points in plain language:
    Zod. **If anything is wrong the process stops** with `Invalid configuration: …` listing each
    problem. In production (`NODE_ENV=production`) it also refuses unsafe values (see
    [CONFIGURATION.md](CONFIGURATION.md#production-safety-checks)).
-3. `NestFactory.create(AppModule)` builds the app. `apps/api/src/app.module.ts` registers every
-   controller and service, the global JWT module, the rate limiter (600 requests a minute per address
-   by default) and two global guards: `ThrottlerGuard` and `AuthGuard`.
-4. `configureApp()` in `apps/api/src/bootstrap.ts` adds the cookie parser, a JSON body parser (also
-   accepting `application/scim+json`, and keeping raw bytes for `/api/billing/webhook`), the `/api`
-   prefix, `trust proxy`, the edge-trust middleware (`edgeTrust`) and the security headers
-   (`securityHeaders`).
-5. `PrismaService.onModuleInit` (`apps/api/src/common/prisma.service.ts`) connects to MongoDB.
-6. `JobWorker.onApplicationBootstrap` starts the job loop if `JOB_WORKER=on`; `CallbackWorker` does
-   the same if `CALLBACK_WORKER=on`.
-7. The API listens on `API_PORT` (4000).
+3. `createApp()` in `apps/api/src/http/app.ts` builds the Express app. `apps/api/src/container.ts`
+   lists every service and controller and what each is built from (services are built once, on first
+   use). The app adds the cookie parser, a JSON body parser (also accepting `application/scim+json`, and
+   keeping raw bytes for `/api/billing/webhook` and SampAudience events), form bodies, `trust proxy`,
+   the edge-trust middleware (`edgeTrust`) and the security headers (`securityHeaders`, both in
+   `bootstrap.ts`), then mounts every controller's routes (`ROUTES` in `container.ts`), a JSON 404 and
+   the error middleware.
+4. `app.listen()` runs the start hooks in the order of `PROVIDERS`: `PrismaService.onModuleInit`
+   (`apps/api/src/common/prisma.service.ts`) connects to MongoDB; the plan catalog and integration
+   settings load; then `JobWorker.onApplicationBootstrap` starts the job loop if `JOB_WORKER=on` and
+   `CallbackWorker` does the same if `CALLBACK_WORKER=on`.
+5. The API listens on `API_PORT` (4000). On SIGTERM or SIGINT it stops the workers and disconnects
+   (`closeOnSignals`).
 
 ### Worker (`apps/api/src/worker.ts`)
 
-Same `AppModule` without the HTTP server (`createApplicationContext`). It always starts `JobWorker`
+Same `createApp()` with only the start hooks and no HTTP server (`createApp().init()`). It always starts `JobWorker`
 and `CallbackWorker`. When it runs, set `JOB_WORKER=off` and `CALLBACK_WORKER=off` on the API so the
 work is not done twice (the `docker-compose.yml` does this).
 
@@ -189,7 +191,7 @@ sequenceDiagram
   participant D as MongoDB
   B->>N: fetch('/api/surveys/abc', cookie zapx_token, x-zapx-csrf: 1)
   N->>A: rewrite to http://localhost:4000/api/surveys/abc
-  A->>A: ThrottlerGuard (rate limit)
+  A->>A: rate limit (kit.route)
   A->>A: AuthGuard (cookie → user, role check)
   A->>D: Prisma query scoped by tenantId + project access
   D-->>A: rows
@@ -212,9 +214,22 @@ Bearer <session token>` (kept in `expo-secure-store`) and `X-ZAPX-Client: mobile
 
 ### Backend routing
 
-Every route lives under `/api` (set in `bootstrap.ts`). Each controller declares a prefix with
-`@Controller('...')` and each method a path with `@Get`, `@Post`, `@Put`, `@Patch` or `@Delete`. The
-full list of 283 routes, with their files, is in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+Every route lives under `/api`. Each controller file ends with a route function (for example
+`surveysControllerRoutes(r, c, kit)`) that registers its routes on the Express router with their full
+path, method, roles and limits:
+
+```ts
+r.get(
+  '/api/surveys/:id',
+  ...kit.route({ controller: 'SurveysController', handler: 'detail', method: 'get' }, (req) =>
+    c.detail(req.user as AuthUser, req.params.id),
+  ),
+);
+```
+
+`kit.route` (`apps/api/src/http/routes.ts`) returns the middleware chain for the route (section 6).
+`ROUTES` in `apps/api/src/container.ts` mounts the route functions in order; the first match answers.
+The full list of routes, with their files, is in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 ### Studio routing (Next.js App Router, folder = URL)
 
@@ -255,10 +270,10 @@ role sees.
 
 ```mermaid
 flowchart TD
-  A[HTTP request /api/...] --> B[Express middleware in bootstrap.ts:<br/>cookies, JSON body, edgeTrust, security headers]
-  B --> C{ThrottlerGuard:<br/>over the rate limit?}
+  A[HTTP request /api/...] --> B[Express middleware in http/app.ts:<br/>cookies, JSON body, edgeTrust, security headers]
+  B --> C{Rate limit:<br/>over the route's limit?}
   C -- yes --> C1[429 Too Many Requests]
-  C -- no --> D{AuthGuard:<br/>route marked @Public?}
+  C -- no --> D{AuthGuard:<br/>route public: true?}
   D -- yes --> F
   D -- no --> E{Valid cookie, session token<br/>or API key? CSRF header for<br/>cookie writes? Role allowed?}
   E -- no --> E1[401 or 403]
@@ -271,9 +286,10 @@ flowchart TD
   G --> K[JSON response]
 ```
 
-1. **Middleware** (`bootstrap.ts`) parses cookies and JSON, applies edge trust and security headers.
-2. **Rate limit** (`ThrottlerGuard`, limits in `app.module.ts` and `@Throttle` on routes). Counters
-   are kept in each process's memory.
+1. **Middleware** (`http/app.ts`) parses cookies and JSON, applies edge trust and security headers.
+2. **Rate limit** (`throttle()` in `http/throttle.ts`: 600 a minute per address unless the route sets
+   `throttle`). Counters are shared in the database in production (`THROTTLE_STORE=database`) or kept in
+   the process's memory.
 3. **Authentication and roles** (`apps/api/src/auth/auth.guard.ts`, section 7).
 4. **Validation**: controllers call `parseBody(schema, body)` (`apps/api/src/common/validation.ts`),
    which throws `400 {message: 'Invalid request', issues: [{path, message}]}`. Survey definitions are
@@ -285,7 +301,8 @@ flowchart TD
 6. **Work and storage**: services use `PrismaService`. Studio reads of respondent data use
    `prisma.forTenant(tenantId)`, which adds the organization to every filter on respondent data.
 7. **Audit**: changes call `AuditService.record(actor, action, entityType, entityId, data)`.
-8. **Response**: the method's return value is sent as JSON. Files are streamed with
+8. **Response**: the method's return value is sent as JSON (status 201 for POST, 200 otherwise, unless
+   the route sets `status` or the method calls `res.status()`). Files are streamed with
    `apps/api/src/common/send-bytes.ts` or `res.send`.
 
 ## 7. Authentication and authorization
@@ -309,7 +326,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[Request] --> P{@Public route?}
+  A[Request] --> P{Route public: true?}
   P -- yes --> OK[Allowed]
   P -- no --> T{Bearer header or zapx_token cookie?}
   T -- none --> U401[401 Not signed in]
@@ -320,7 +337,7 @@ flowchart TD
   V -- yes --> K[API key: look up prefix, compare hash,<br/>not revoked or expired, creator active,<br/>role = lower of key and creator]
   V -- no --> S[Session: verify HS256 JWT, load user from DB,<br/>check disabled, sign-out-everywhere, revoked jti]
   K --> R
-  S --> R{Role allowed by @Roles?<br/>INTERVIEWER only where named}
+  S --> R{Role in the route's roles?<br/>INTERVIEWER only where named}
   R -- no --> F403b[403 Your role cannot do this]
   R -- yes --> E{Entitlements, PR #41:<br/>/super route and not super admin?<br/>organization suspended?<br/>mobile client without mobile access?<br/>route's feature off?}
   E -- "yes" --> F403c[403 SUPER_ADMIN_ONLY / ORG_SUSPENDED /<br/>MOBILE_DISABLED / FEATURE_DISABLED]
@@ -360,7 +377,7 @@ On top of roles, `User.projectScope` = `ASSIGNED` limits programmers and viewers
 members of (`ProjectMember`). Plans (`apps/api/src/plans/plans.ts`) limit seats, interviewers, live
 surveys and monthly completes, and gate SSO and SCIM.
 
-Some admin checks are inside the method rather than in `@Roles` (for example
+Some admin checks are inside the method rather than in the route's `roles` (for example
 `AiSettingsController.get/save` and `IntegrationsController.saveOrgDefaults`), so always read the
 method too.
 
@@ -447,17 +464,17 @@ flowchart LR
 
 ## 9. Error handling
 
-| Where             | How errors are handled                                                                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Configuration     | `config()` throws at start-up with every invalid variable listed; the process exits                                                                                                  |
-| API requests      | NestJS built-in exception filter: `HttpException` subclasses become `{statusCode, message, ...}`; anything else becomes `500 Internal server error` and is logged by Nest's `Logger` |
-| Validation        | `parseBody` → `400 {message: 'Invalid request', issues}`; interview pages → `InterviewValidationError` (422) with per-question messages                                              |
-| Conflicts         | stale drafts, stale pages, already-finished interviews → `409 Conflict`                                                                                                              |
-| Publishing        | `422 Unprocessable Entity` with the check report                                                                                                                                     |
-| Respondent errors | unexpected errors become the `technical_error` outcome with an error id (search the API log for `Interview <id> failed (error <errorId>)`)                                           |
-| SCIM              | `ScimExceptionFilter` (`apps/api/src/scim/scim.errors.ts`) returns SCIM-format errors                                                                                                |
-| Background work   | job, callback, webhook and automation failures are stored on the row (`error`, `lastError`, `log`) and retried with backoff; the loop logs and continues                             |
-| Studio            | `ApiError` from `lib/api.ts`; components show it with `ErrorNote` (`components/Shell.tsx`); 401 sends you to `/login`                                                                |
+| Where             | How errors are handled                                                                                                                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Configuration     | `config()` throws at start-up with every invalid variable listed; the process exits                                                                                                                  |
+| API requests      | `errorHandler` in `apps/api/src/http/app.ts`: `HttpException` subclasses (`src/http/errors.ts`) become `{statusCode, message, ...}`; anything else becomes `500 Internal server error` and is logged |
+| Validation        | `parseBody` → `400 {message: 'Invalid request', issues}`; interview pages → `InterviewValidationError` (422) with per-question messages                                                              |
+| Conflicts         | stale drafts, stale pages, already-finished interviews → `409 Conflict`                                                                                                                              |
+| Publishing        | `422 Unprocessable Entity` with the check report                                                                                                                                                     |
+| Respondent errors | unexpected errors become the `technical_error` outcome with an error id (search the API log for `Interview <id> failed (error <errorId>)`)                                                           |
+| SCIM              | `ScimExceptionFilter` (`apps/api/src/scim/scim.errors.ts`, the routes' `onError`) returns SCIM-format errors                                                                                         |
+| Background work   | job, callback, webhook and automation failures are stored on the row (`error`, `lastError`, `log`) and retried with backoff; the loop logs and continues                                             |
+| Studio            | `ApiError` from `lib/api.ts`; components show it with `ErrorNote` (`components/Shell.tsx`); 401 sends you to `/login`                                                                                |
 
 There is no central error-tracking service (such as Sentry) in the code. Logs go to standard output
 (CloudWatch on AWS).
@@ -469,7 +486,7 @@ in the separate worker process (`apps/api/src/worker.ts`).
 
 | Loop                                                                                                      | Interval                         | Does                                                                                                                                                                                                                                                                                                                     |
 | --------------------------------------------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `JobWorker` (`apps/api/src/jobs/job.worker.ts`)                                                           | `JOB_POLL_MS` (2 s)              | claims up to 20 queued `Job` rows per pass with `FOR UPDATE SKIP LOCKED` and a lease; types `export`, `qa_run`, `ai_propose`, `transcribe`; then sends due email/SMS waves (`DistributionService.pass`), runs automation (`AutomationService.pass`)                                                                      |
+| `JobWorker` (`apps/api/src/jobs/job.worker.ts`)                                                           | `JOB_POLL_MS` (2 s)              | claims up to 20 queued `Job` rows per pass with a conditional update and a lease; types `export`, `qa_run`, `ai_propose`, `transcribe`; then sends due email/SMS waves (`DistributionService.pass`), runs automation (`AutomationService.pass`)                                                                          |
 | `JobWorker.housekeeping`                                                                                  | once an hour                     | deletes expired files, old jobs, old webhook deliveries, expired captures, old automation runs and read notifications, expired SAML requests, old billing events; applies retention policies (`GovernanceService.applyRetention`); retries dialer recordings                                                             |
 | `CallbackWorker` (`apps/api/src/integrations/callback.worker.ts`)                                         | `CALLBACK_POLL_MS` (5 s)         | delivers vendor callbacks and webhooks from their outboxes with retries and dead-lettering; marks idle interviews as partial                                                                                                                                                                                             |
 | `PlatformAutomationService` (`apps/api/src/super-admin/platform-automation.service.ts`) _(PR #41)_        | `PLATFORM_AUTOMATION_MS` (60 s)  | checks the super admin's rules (`org_created`, `subscription_ending`, `subscription_ended`, `completes_used`, `seats_full`, `admins_inactive`) against every organization and runs their actions; each firing is a `PlatformAutomationRun` row with a unique `dedupeKey`, so it happens once even with several processes |
@@ -477,7 +494,8 @@ in the separate worker process (`apps/api/src/worker.ts`).
 
 Jobs run as the member who created them, reloaded from the database, so their current role and
 project access apply ([ADR 0013](../adr/0013-background-jobs-and-file-storage.md)). Several workers
-can run safely because rows are claimed with `SKIP LOCKED`.
+can run safely because each row is claimed with a conditional update that only one of them wins
+(`claimQueued` in `apps/api/src/common/mongo.ts`).
 
 ## 11. Risky areas: read before changing
 

@@ -1,7 +1,7 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import type { RequestGuard } from '../http/routes';
 import type { Request } from 'express';
-import { PrismaService } from '../common/prisma.service';
-import { PlanService } from '../plans/plan.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type PlanService } from '../plans/plan.service';
 import { secretMatches } from '../auth/api-keys';
 import { parseScimToken } from './scim-token';
 import { ScimError } from './scim.errors';
@@ -11,15 +11,13 @@ export interface ScimRequest extends Request {
 }
 
 /** Authenticates the identity provider's SCIM token; the request then acts on that organization only. */
-@Injectable()
-export class ScimGuard implements CanActivate {
+export class ScimGuard implements RequestGuard {
   constructor(
     private readonly prisma: PrismaService,
     private readonly plans: PlanService,
   ) {}
 
-  async canActivate(ctx: ExecutionContext) {
-    const req = ctx.switchToHttp().getRequest<ScimRequest>();
+  async canActivate(req: ScimRequest) {
     const header = req.headers.authorization;
     const parsed = header?.startsWith('Bearer ') ? parseScimToken(header.slice(7)) : null;
     const row = parsed ? await this.prisma.tenantScim.findUnique({ where: { prefix: parsed.prefix } }) : null;

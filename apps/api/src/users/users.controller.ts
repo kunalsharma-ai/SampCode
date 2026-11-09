@@ -1,25 +1,16 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  NotFoundException,
-  Param,
-  Patch,
-  Post,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import { isCommonPassword } from '../auth/password-policy';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Roles } from '../auth/decorators';
-import { PlanService } from '../plans/plan.service';
-import { PasswordResetService } from '../auth/password-reset.service';
+
+import { type PlanService } from '../plans/plan.service';
+import { type PasswordResetService } from '../auth/password-reset.service';
 
 const createSchema = z.object({
   name: z.string().min(1).max(120),
@@ -59,8 +50,6 @@ const SELECT = USER_SELECT;
 export const scopeFor = (role: string, scope: 'ALL' | 'ASSIGNED') => (role === 'PROGRAMMER' || role === 'VIEWER' ? scope : 'ALL');
 
 /** Team members within the caller's tenant. Admins only. */
-@Controller('users')
-@Roles('ADMIN')
 export class UsersController {
   constructor(
     private readonly prisma: PrismaService,
@@ -75,9 +64,7 @@ export class UsersController {
    * emailed to the member. It voids the member's older links; their current password keeps
    * working until the link is used.
    */
-  @Post(':id/password-reset')
-  @HttpCode(201)
-  async resetLink(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async resetLink(user: AuthUser, id: string) {
     const member = await this.prisma.user.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!member) throw new NotFoundException('Member not found');
     if (member.disabledAt) throw new BadRequestException('Enable this member before resetting their password');
@@ -88,8 +75,7 @@ export class UsersController {
     return { url: link.url, expiresAt: link.expiresAt, emailed };
   }
 
-  @Get()
-  list(@CurrentUser() user: AuthUser) {
+  list(user: AuthUser) {
     return this.prisma.user.findMany({
       where: { tenantId: user.tenantId },
       select: { ...SELECT, _count: { select: { projects: true } } },
@@ -97,8 +83,7 @@ export class UsersController {
     });
   }
 
-  @Post()
-  async create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async create(user: AuthUser, body: unknown) {
     const input = parseBody(createSchema, body);
     if (await this.prisma.user.findUnique({ where: { email: input.email } }))
       throw new ForbiddenException('An account with this email already exists');
@@ -123,8 +108,7 @@ export class UsersController {
   }
 
   /** Change a member's role or project access. Applies to their next request (the guard reads it fresh). */
-  @Patch(':id')
-  async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async update(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(updateSchema, body);
     const before = await this.prisma.user.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!before) throw new NotFoundException('Member not found');
@@ -149,4 +133,32 @@ export class UsersController {
     );
     return updated;
   }
+}
+
+/** Express routes of UsersController (mounted by src/http/app.ts). */
+export function usersControllerRoutes(r: Router, c: UsersController, kit: RouteKit) {
+  r.post(
+    '/api/users/:id/password-reset',
+    ...kit.route({ controller: 'UsersController', handler: 'resetLink', method: 'post', status: 201, roles: ['ADMIN'] }, (req) =>
+      c.resetLink(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/users',
+    ...kit.route({ controller: 'UsersController', handler: 'list', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.list(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/users',
+    ...kit.route({ controller: 'UsersController', handler: 'create', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.create(req.user as AuthUser, req.body),
+    ),
+  );
+  r.patch(
+    '/api/users/:id',
+    ...kit.route({ controller: 'UsersController', handler: 'update', method: 'patch', roles: ['ADMIN'] }, (req) =>
+      c.update(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
 }

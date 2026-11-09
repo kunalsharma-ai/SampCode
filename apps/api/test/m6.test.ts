@@ -11,17 +11,13 @@ vi.hoisted(() => {
   process.env.CALLBACK_ALLOW_PRIVATE_HOSTS = 'true';
 });
 
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { WebhookService } from '../src/integrations/webhook.service';
 import { verifyWebhook } from '../src/integrations/webhook-signing';
@@ -29,7 +25,7 @@ import { verifyWebhook } from '../src/integrations/webhook-signing';
 const demo = JSON.parse(readFileSync(join(__dirname, '../../../docs/examples/demo-screener.json'), 'utf8'));
 const run = `m6${Date.now().toString(36)}`;
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let auth: Record<string, string>;
@@ -108,8 +104,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => receiver.listen(0, '127.0.0.1', r));
   receiverBase = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}`;
 
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

@@ -38,7 +38,7 @@ docker compose up -d mongo               # MongoDB 8, one-member replica set rs0
 # 5. build everything (generates the Prisma client, compiles packages and apps)
 pnpm build
 
-# 6. tables and a first admin
+# 6. collections, indexes and a first admin
 pnpm db:migrate
 pnpm db:seed                             # demo admin from SEED_EMAIL / SEED_PASSWORD (defaults in packages/db/src/seed.ts)
 ```
@@ -175,34 +175,42 @@ Example: a free-text `notes` field on projects.
 
 Fields inside the **survey definition** (not a table) are different: change
 `packages/survey-schema/src/index.ts`, keep them optional with a default so published versions still
-parse, then the logic engine and editors. No migration.
+parse, then the logic engine and editors. No database change.
 
 ### Create a new API endpoint
 
 Example: `GET /api/projects/:id/summary`.
 
-1. Pick the module folder (`apps/api/src/projects/`). Add a method to the controller:
+1. Pick the module folder (`apps/api/src/projects/`). Add a method to the controller class, and one
+   line to the route function at the end of the same file:
 
    ```ts
-   @Get(':id/summary')
-   async summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+   async summary(user: AuthUser, id: string) {
      const project = await this.prisma.project.findFirst({ where: { id, ...this.access.projects(user) } });
      if (!project) throw new NotFoundException('Project not found');
      return { … };
    }
+
+   // in projectsControllerRoutes(r, c, kit):
+   r.get('/api/projects/:id/summary', ...kit.route({ controller: 'ProjectsController', handler: 'summary', method: 'get' }, (req) => c.summary(req.user as AuthUser, req.params.id)));
    ```
 
-2. Decide who may call it: no decorator = every signed-in role except interviewers;
-   `@Roles(...CAN_EDIT)` for programmers and admins; `@Roles('ADMIN')`; `@Public()` only for
+   The return value is sent as JSON (201 for POST, 200 otherwise; `status: 204` to change it). Read
+   the body with `req.body`, query strings with `req.query.x as string | undefined`, a file with
+   `upload: { field: 'file', limits }` and `req.file`. Routes are matched in order, so put
+   `/projects/summary` before `/projects/:id`.
+
+2. Decide who may call it: no `roles` = every signed-in role except interviewers;
+   `roles: [...CAN_EDIT]` for programmers and admins; `roles: ['ADMIN']`; `public: true` only for
    respondent or partner routes that check something else.
 3. Validate input with a Zod schema and `parseBody` (`apps/api/src/common/validation.ts`).
-4. Put real logic in a service (`*.service.ts`). A **new** controller or service must be added to
-   `controllers` / `providers` in `apps/api/src/app.module.ts` (or to `integrations.module.ts` for that
-   module).
+4. Put real logic in a service (`*.service.ts`). A **new** service is one line in `PROVIDERS` in
+   `apps/api/src/container.ts` (`[MyService, (get) => new MyService(get(PrismaService), get(AuditService))]`);
+   a **new** controller goes in `CONTROLLERS` and its route function in `ROUTES` there.
 5. Record changes with `this.audit.record(user, 'project.something', 'project', id, data)`.
-6. Add a rate limit with `@Throttle({ default: { limit: N, ttl: 60_000 } })` if it is expensive.
+6. Add a rate limit with `throttle: { limit: N, ttl: 60_000 }` in the route's options if it is expensive.
 7. Call it from the studio with `api('/projects/' + id + '/summary')`.
-8. Test it in `apps/api/test/` with Supertest (copy the setup from an existing file).
+8. Test it in `apps/api/test/` with Supertest against `createApp()` (copy the setup from an existing file).
 9. If partners use it, document it in `docs/api/openapi.yaml`.
 10. _(PR #41)_ If the route belongs to a feature that plans can switch off, add its path pattern to
     `RULES` in `apps/api/src/super-admin/features.ts`. A route that is not listed there is open to
@@ -265,7 +273,7 @@ Roles touch many files; plan carefully.
 3. `apps/api/src/auth/decorators.ts`: groups such as `CAN_EDIT`, `ALL_ROLES`.
 4. `apps/api/src/auth/auth.guard.ts`: today `INTERVIEWER` is deny-by-default; decide whether the new
    role is too.
-5. Go through every `@Roles(...)` in `apps/api/src` (`grep -rn "@Roles" apps/api/src`) and the
+5. Go through every route's `roles` in `apps/api/src` (`grep -rn "roles: \[" apps/api/src`) and the
    in-method checks (`grep -rn "role !== 'ADMIN'\|role === 'ADMIN'" apps/api/src`).
 6. Users and SCIM: role validation in `apps/api/src/users/users.controller.ts` and
    `apps/api/src/scim/scim.controller.ts`; SSO just-in-time roles in `TenantSso.jitRole`.
@@ -278,7 +286,7 @@ Roles touch many files; plan carefully.
 To give a project-level permission instead of a new role, use project access
 (`ProjectMember`, `AccessService`). To sell a capability per plan instead, use a feature
 (`apps/api/src/super-admin/features.ts`) _(PR #41)_. The super admin is a flag (`User.superAdmin`),
-not a role; do not add it to `@Roles`.
+not a role; do not add it to a route's `roles`.
 
 ### Modify business logic
 

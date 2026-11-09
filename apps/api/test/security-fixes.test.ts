@@ -17,24 +17,20 @@ vi.hoisted(() => {
   process.env.SENDGRID_API_BASE = 'http://127.0.0.1:9';
 });
 
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { resetConfig } from '../src/config';
 import { tokenHash } from '../src/auth/password-reset.service';
 
 const run = `sec${Date.now().toString(36)}`;
 const password = 'correct-horse-battery';
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let admin: Record<string, string>;
@@ -70,8 +66,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => mailServer.listen(0, '127.0.0.1', r));
   process.env.SENDGRID_API_BASE = `http://127.0.0.1:${(mailServer.address() as AddressInfo).port}`;
   resetConfig();
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

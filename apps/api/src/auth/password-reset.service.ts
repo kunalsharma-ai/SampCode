@@ -1,21 +1,10 @@
-/**
- * Password change and reset (security fix after the maintainer handbook review).
- *
- * - A member changes their own password with the current one (AuthController.changePassword).
- * - An administrator creates a one-time reset link for a member (UsersController.resetLink). The
- *   link is shown to the administrator once and, when email is set up, also emailed to the member.
- * - "Forgot password" emails a link to the member when email is set up (AuthController.forgot).
- *
- * Only a SHA-256 hash of a reset token is stored. A link works once, for PASSWORD_RESET_HOURS, and
- * a new link voids the member's older unused ones. Every password change signs out the member's
- * other sessions (sessionsRevokedAt) and clears an account lockout.
- */
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHash, randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { emailProvider } from '../distribution/mailer';
 import { isCommonPassword } from './password-policy';
 
@@ -32,7 +21,6 @@ const FORGOT_COOLDOWN_MS = 2 * 60_000;
 
 export const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 
-@Injectable()
 export class PasswordResetService {
   private readonly log = new Logger('PasswordReset');
 

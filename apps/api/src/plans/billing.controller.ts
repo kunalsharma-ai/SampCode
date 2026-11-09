@@ -1,45 +1,33 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Req, UnauthorizedException } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { BadRequestException, UnauthorizedException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Public, Roles } from '../auth/decorators';
-import { BillingService, StripeSignatureError } from './billing.service';
+
+import { type BillingService, StripeSignatureError } from './billing.service';
 
 const checkoutSchema = z.object({ plan: z.enum(['free', 'team', 'business', 'enterprise']) });
 
 /** Billing (Milestone 13): admins buy and manage the plan; Stripe reports subscription changes. */
-@Controller('billing')
 export class BillingController {
   constructor(private readonly billing: BillingService) {}
 
-  @Get()
-  @Roles('ADMIN')
-  summary(@CurrentUser() user: AuthUser) {
+  summary(user: AuthUser) {
     return this.billing.summary(user.tenantId);
   }
 
-  @Post('checkout')
-  @Roles('ADMIN')
-  @HttpCode(200)
-  checkout(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  checkout(user: AuthUser, body: unknown) {
     return this.billing.checkout(user, parseBody(checkoutSchema, body).plan);
   }
 
-  @Post('portal')
-  @Roles('ADMIN')
-  @HttpCode(200)
-  portal(@CurrentUser() user: AuthUser) {
+  portal(user: AuthUser) {
     return this.billing.portal(user);
   }
 
   /** Stripe webhooks. Authenticated by the Stripe-Signature header over the raw body. */
-  @Public()
-  @SkipThrottle()
-  @Post('webhook')
-  @HttpCode(200)
-  async webhook(@Req() req: Request & { rawBody?: Buffer }, @Headers('stripe-signature') signature?: string) {
+  async webhook(req: Request & { rawBody?: Buffer }, signature?: string) {
     try {
       return await this.billing.webhook(req.rawBody, signature);
     } catch (e) {
@@ -48,4 +36,33 @@ export class BillingController {
       throw e;
     }
   }
+}
+
+/** Express routes of BillingController (mounted by src/http/app.ts). */
+export function billingControllerRoutes(r: Router, c: BillingController, kit: RouteKit) {
+  r.get(
+    '/api/billing',
+    ...kit.route({ controller: 'BillingController', handler: 'summary', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.summary(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/billing/checkout',
+    ...kit.route({ controller: 'BillingController', handler: 'checkout', method: 'post', status: 200, roles: ['ADMIN'] }, (req) =>
+      c.checkout(req.user as AuthUser, req.body),
+    ),
+  );
+  r.post(
+    '/api/billing/portal',
+    ...kit.route({ controller: 'BillingController', handler: 'portal', method: 'post', status: 200, roles: ['ADMIN'] }, (req) =>
+      c.portal(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/billing/webhook',
+    ...kit.route(
+      { controller: 'BillingController', handler: 'webhook', method: 'post', status: 200, public: true, throttle: false },
+      (req) => c.webhook(req, req.headers['stripe-signature'] as unknown as string),
+    ),
+  );
 }

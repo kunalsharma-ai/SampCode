@@ -14,14 +14,10 @@ vi.hoisted(() => {
   process.env.CAPTURE_RETENTION_DAYS = '30';
 });
 
-import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { CaptureService, checkCapture } from '../src/captures/capture.service';
 
@@ -30,7 +26,7 @@ const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(2000, 5)]);
 const PDF = Buffer.from('%PDF-1.4 not a photo');
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let admin: Record<string, string>;
@@ -53,8 +49,7 @@ async function publish(name: string, definition: unknown) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

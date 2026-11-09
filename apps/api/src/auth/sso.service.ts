@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -6,10 +7,10 @@ import { hash } from 'bcryptjs';
 import { createRemoteJWKSet, jwtVerify, SignJWT, type JWTVerifyGetKey } from 'jose';
 import type { Role } from '@zapx/db';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { PlanService } from '../plans/plan.service';
-import { SecretBox } from '../platform/secret-box';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PlanService } from '../plans/plan.service';
+import { type SecretBox } from '../platform/secret-box';
 import { guardedFetch, isPrivateAddress } from '../common/net-guard';
 import type { AuthUser } from './auth.types';
 
@@ -79,7 +80,6 @@ export const safeNext = (next: unknown) => {
  * ID token verification against the provider's published keys. One provider per organization,
  * chosen by the email domain the person types.
  */
-@Injectable()
 export class SsoService {
   private readonly log = new Logger('SSO');
   private readonly discoveries = new Map<string, { doc: Discovery; at: number }>();

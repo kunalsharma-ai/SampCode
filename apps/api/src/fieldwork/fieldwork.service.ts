@@ -1,22 +1,11 @@
-/**
- * Blueprint phase 3: supervising face-to-face fieldwork.
- *
- * - Back-checks: a share of each interviewer's completed CAPI interviews is drawn at random for a
- *   supervisor to verify (call the respondent, visit, or listen to the recording). A failed check
- *   rejects the interview through the normal quality review, so quotas and webhooks stay right.
- * - Supervisor dashboard: per-interviewer productivity and quality, exceptions, and a map of where
- *   interviews started. Everything is computed from stored interviews; nothing is estimated.
- * - Appeals: an interviewer asks for a rejected interview to be looked at again; a supervisor upholds
- *   the rejection or overturns it (the interview is reinstated if its quotas have room).
- */
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '../http/errors';
 import { randomInt } from 'node:crypto';
 import type { BackCheckMethod, BackCheckState } from '@zapx/db';
 import { capiSettingsOf, type SurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { QualityService } from '../quality/quality.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type QualityService } from '../quality/quality.service';
 import type { AuthUser } from '../auth/auth.types';
 import { createManySkipDuplicates } from '../common/mongo-compat';
 
@@ -44,7 +33,6 @@ interface Flag {
   detail?: string;
 }
 
-@Injectable()
 export class FieldworkService {
   constructor(
     private readonly prisma: PrismaService,

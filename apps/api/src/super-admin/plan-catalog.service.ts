@@ -1,6 +1,7 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Logger } from '../http/logger';
+import type { OnModuleDestroy, OnModuleInit } from '../http/lifecycle';
 import type { Prisma, SubscriptionPlan } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { PLANS, PLAN_CODES, isPlanCode, planOf, type PlanLimits } from '../plans/plans';
 import { allFeatures } from './features';
 import { createManySkipDuplicates } from '../common/mongo-compat';
@@ -39,7 +40,6 @@ export function readLimits(raw: unknown): PlanLimits {
  * the console. Every process keeps a copy that it refreshes every 10 seconds and at once after a
  * change it made itself. On first start the built-in plans (plans.ts) are written with every feature.
  */
-@Injectable()
 export class PlanCatalogService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Plans');
   private plans = new Map<string, CatalogPlan>();

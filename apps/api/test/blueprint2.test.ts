@@ -2,15 +2,11 @@
  * Blueprint phase 2 over the API: glossary sent with AI translation, translation memory reused
  * across surveys, per-language QA.
  */
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { AiProvider, type TranslateRequest, type TranslateResult } from '../src/ai/ai-provider';
 
 process.env.ALLOW_SIGNUP = 'true';
@@ -31,7 +27,7 @@ class FakeTranslator extends AiProvider {
 }
 
 const fake = new FakeTranslator();
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let auth: Record<string, string>;
 let other: Record<string, string>;
@@ -58,11 +54,7 @@ async function surveyWithFrench(name: string) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AiProvider)
-    .useValue(fake)
-    .compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp({ overrides: [[AiProvider, fake]] });
   await app.init();
   http = request(app.getHttpServer());
   auth = await register('a');

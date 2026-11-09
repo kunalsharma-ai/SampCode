@@ -1,24 +1,14 @@
-/**
- * Partner-facing, versioned API (contract: docs/api/openapi.yaml). Vendors authenticate every
- * request with their vendor id and an HMAC of timestamp, method and path:
- *
- *   X-Zapx-Vendor:    <vendor id>
- *   X-Zapx-Timestamp: <unix seconds>            (must be within 5 minutes)
- *   X-Zapx-Signature: hex HMAC-SHA256(vendor secret, "<timestamp>.<METHOD>.<path?query>")
- */
-import { BadRequestException, Controller, Get, Param, Query, Req, UnauthorizedException } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { BadRequestException, UnauthorizedException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request } from 'express';
 import { verifyRequest } from '@zapx/redirect-core';
-import { Public } from '../auth/decorators';
-import { AuditService } from '../common/audit.service';
-import { RedirectRepository } from './redirect.repository';
+
+import { type AuditService } from '../common/audit.service';
+import { type RedirectRepository } from './redirect.repository';
 
 const ID = /^[a-z0-9]{10,40}$/;
 
-@Public()
-@Throttle({ default: { limit: 120, ttl: 60_000 } })
-@Controller('v1/vendor')
 export class VendorApiController {
   constructor(
     private readonly repo: RedirectRepository,
@@ -58,13 +48,7 @@ export class VendorApiController {
   }
 
   /** Outcomes recorded for this vendor's respondents, oldest first; page with `since`. */
-  @Get('outcomes')
-  async outcomes(
-    @Req() req: Request,
-    @Query('since') since?: string,
-    @Query('surveyId') surveyId?: string,
-    @Query('limit') limit?: string,
-  ) {
+  async outcomes(req: Request, since?: string, surveyId?: string, limit?: string) {
     const vendor = await this.authenticate(req);
     const sinceDate = since ? new Date(since) : undefined;
     if (sinceDate && Number.isNaN(sinceDate.getTime())) throw new BadRequestException('since must be an ISO 8601 date-time');
@@ -76,11 +60,34 @@ export class VendorApiController {
   }
 
   /** Outcomes for one respondent id (one per survey). */
-  @Get('outcomes/:uid')
-  async outcome(@Req() req: Request, @Param('uid') uid: string, @Query('surveyId') surveyId?: string) {
+  async outcome(req: Request, uid: string, surveyId?: string) {
     const vendor = await this.authenticate(req);
     if (uid.length > 200) throw new BadRequestException('Invalid uid');
     if (surveyId && !ID.test(surveyId)) throw new BadRequestException('Invalid surveyId');
     return { items: VendorApiController.present(await this.repo.outcomesForVendor(vendor.id, { uid, surveyId, take: 100 })) };
   }
+}
+
+/** Express routes of VendorApiController (mounted by src/http/app.ts). */
+export function vendorApiControllerRoutes(r: Router, c: VendorApiController, kit: RouteKit) {
+  r.get(
+    '/api/v1/vendor/outcomes',
+    ...kit.route(
+      { controller: 'VendorApiController', handler: 'outcomes', method: 'get', public: true, throttle: { limit: 120, ttl: 60_000 } },
+      (req) =>
+        c.outcomes(
+          req,
+          req.query.since as unknown as string,
+          req.query.surveyId as unknown as string,
+          req.query.limit as unknown as string,
+        ),
+    ),
+  );
+  r.get(
+    '/api/v1/vendor/outcomes/:uid',
+    ...kit.route(
+      { controller: 'VendorApiController', handler: 'outcome', method: 'get', public: true, throttle: { limit: 120, ttl: 60_000 } },
+      (req) => c.outcome(req, req.params.uid, req.query.surveyId as unknown as string),
+    ),
+  );
 }

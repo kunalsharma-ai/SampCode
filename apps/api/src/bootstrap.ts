@@ -1,8 +1,6 @@
-import { type INestApplication, Logger } from '@nestjs/common';
+import { Logger } from './http/logger';
 import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
-import cookieParser from 'cookie-parser';
-import type { NestExpressApplication } from '@nestjs/platform-express';
 import { config } from './config';
 
 type EdgeRequest = { headers: Record<string, string | string[] | undefined>; ip?: string };
@@ -60,37 +58,6 @@ export function securityHeaders(https: boolean): Array<[string, string]> {
   ];
   if (https) h.push(['Strict-Transport-Security', 'max-age=31536000; includeSubDomains']);
   return h;
-}
-
-/** Shared app setup used by main.ts and the integration tests. */
-export function configureApp(app: INestApplication) {
-  app.use(cookieParser());
-  // SCIM clients send application/scim+json (Milestone 8). Registering a JSON parser replaces Nest's
-  // default one, so this parser reads both types (with the default 100 kB limit).
-  // The Stripe webhook (Milestone 13) and SAMPLEON events are verified over the exact bytes received, so they are kept for those paths.
-  (app as NestExpressApplication).useBodyParser('json', {
-    type: ['application/json', 'application/scim+json'],
-    verify: (req: { url?: string; rawBody?: Buffer }, _res: unknown, buf: Buffer) => {
-      // SAMPLEON events are signed over the exact bytes too (Sampledge service signature).
-      if (req.url?.startsWith('/api/billing/webhook') || req.url?.startsWith('/api/v1/sampleon/')) req.rawBody = buf;
-    },
-  });
-  app.setGlobalPrefix('api');
-  app.enableShutdownHooks();
-  // The studio and runtime reach the API through same-origin proxies; no CORS is enabled.
-  const http = app.getHttpAdapter().getInstance();
-  http.disable('x-powered-by');
-  http.set('trust proxy', config().TRUST_PROXY_HOPS);
-  http.use((req: EdgeRequest, _res: unknown, next: () => void) => {
-    edgeTrust(req);
-    next();
-  });
-  const secure = config().COOKIE_SECURE;
-  http.use((_req: unknown, res: { setHeader(k: string, v: string): void }, next: () => void) => {
-    for (const [k, v] of securityHeaders(secure)) res.setHeader(k, v);
-    next();
-  });
-  return app;
 }
 
 export const logger = new Logger('SampCode');

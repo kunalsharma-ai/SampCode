@@ -1,9 +1,5 @@
-/**
- * Respondent interview flow (CAWI). The server is authoritative: it decides which page comes
- * next, validates every answer, applies terminations and quotas, and resolves vendor redirects.
- * The browser only renders what it is given.
- */
-import { ConflictException, HttpException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, HttpException, NotFoundException, UnprocessableEntityException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Prisma, Response, Survey, Vendor } from '@zapx/db';
 import {
@@ -48,15 +44,15 @@ import {
   type Theme,
 } from '@zapx/survey-schema';
 import { firstFullSlot, takeQuotaPlaces } from '../quotas/quota-places';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { isAllowedReturnUrl, verifySignedParams } from '@zapx/redirect-core';
-import { RedirectService } from '../integrations/redirect.service';
-import { MAX_PAGE_MS, QualityService, type DeviceTraits } from '../quality/quality.service';
-import { NetworkReputationService } from '../quality/network-reputation.service';
-import { CaptureService } from '../captures/capture.service';
+import { type RedirectService } from '../integrations/redirect.service';
+import { MAX_PAGE_MS, type QualityService, type DeviceTraits } from '../quality/quality.service';
+import { type NetworkReputationService } from '../quality/network-reputation.service';
+import { type CaptureService } from '../captures/capture.service';
 import type { BrowserSignals } from '@zapx/quality-core';
-import { PlanService } from '../plans/plan.service';
+import { type PlanService } from '../plans/plan.service';
 import { signingKey } from '../common/signing-keys';
 
 const MAX_PARAMS = 30;
@@ -296,7 +292,6 @@ class QuotaFull extends Error {
   }
 }
 
-@Injectable()
 export class InterviewService {
   private readonly log = new Logger('Interview');
 

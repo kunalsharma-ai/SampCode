@@ -1,20 +1,12 @@
-/**
- * Blueprint phase 3: distribution by email. Contacts are kept per survey; an invitation wave sends
- * each contact a personal link at a scheduled time, then reminds people who have not finished.
- *
- * Personal links are ordinary open links with a random respondent id (`/s/:survey?uid=...`), so
- * the interview, quotas and quality checks are the same as for any respondent. Contact columns
- * become link parameters (URL variables). Everyone can unsubscribe with one click; unsubscribed
- * contacts are never emailed again for this survey.
- */
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { randomBytes } from 'node:crypto';
 import type { Contact, Distribution, Invitation, Prisma } from '@zapx/db';
 import { RESERVED_LINK_PARAMS } from '@zapx/survey-schema';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
 import type { AuthUser } from '../auth/auth.types';
 import { parseCsv } from '../imports/template-import';
 import { emailProvider, type EmailProvider } from './mailer';
@@ -46,7 +38,6 @@ export interface WaveInput {
 /** Statuses after which a respondent is not reminded. */
 const FINISHED = ['COMPLETE', 'TERMINATE', 'QUOTA_FULL', 'QUALITY_FAIL', 'SECURITY_REJECT', 'DUPLICATE', 'TECHNICAL_ERROR'] as const;
 
-@Injectable()
 export class DistributionService {
   private readonly log = new Logger('Distribution');
 
