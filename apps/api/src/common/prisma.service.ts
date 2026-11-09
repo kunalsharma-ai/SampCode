@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ForbiddenException } from '../http/errors';
+import type { OnModuleDestroy, OnModuleInit } from '../http/lifecycle';
 import { Prisma, PrismaClient } from '@zapx/db';
 
 /**
@@ -53,7 +54,6 @@ function checkData(model: string, data: unknown, tenantId: string) {
   }
 }
 
-@Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   /**
    * How tenant isolation of respondent data is applied. On PostgreSQL this reported whether the

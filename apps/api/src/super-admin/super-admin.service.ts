@@ -1,30 +1,20 @@
-/**
- * Super admin: the installation-wide console. Registers organizations and their administrators,
- * manages subscription plans (limits and the features of each plan, separately for the web CRM and
- * the mobile app), switches features on or off per organization and per member, suspends and
- * reactivates organizations, and shows every organization's activity and integrations.
- *
- * Every change is written to the audit log of the organization it touches, with the super admin as
- * the actor, so the organization's own administrators see it too.
- */
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '../http/errors';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import type { Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { PlanService } from '../plans/plan.service';
-import { PasswordResetService } from '../auth/password-reset.service';
-import { IntegrationSettingsService } from '../platform/integration-settings.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PlanService } from '../plans/plan.service';
+import { type PasswordResetService } from '../auth/password-reset.service';
+import { type IntegrationSettingsService } from '../platform/integration-settings.service';
 import type { AuthUser, RoleName } from '../auth/auth.types';
-import { PlanCatalogService, readLimits } from './plan-catalog.service';
-import { EntitlementsService } from './entitlements.service';
+import { type PlanCatalogService, readLimits } from './plan-catalog.service';
+import { type EntitlementsService } from './entitlements.service';
 import { FEATURES, SURFACES, isFeatureKey, readOverrides, resolveEntitlements, type Overrides, type Surface } from './features';
 import type { CreateOrgInput, CreateUserInput, OrgPatch, PlanInput, UserPatch, ActivityQuery } from './super-admin.schemas';
 
 const DAY = 86_400_000;
 
-@Injectable()
 export class SuperAdminService {
   constructor(
     private readonly prisma: PrismaService,

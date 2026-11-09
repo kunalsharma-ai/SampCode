@@ -18,14 +18,10 @@ vi.hoisted(() => {
   process.env.DEEPGRAM_MODEL = 'env-model';
 });
 
-import 'reflect-metadata';
 import { createServer, type Server } from 'node:http';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { AiGateway } from '../src/ai/ai-gateway';
 import { TelephonyService } from '../src/cati/telephony.service';
@@ -39,7 +35,7 @@ const IPINFO_TOKEN = 'ipinfo-token-0123456789-secret';
 const CLAUDE_KEY = 'sk-ant-test-0123456789abcdef-SECRET'; // secret-scan:allow (fake test value)
 const SID = `AC${'2'.repeat(32)}`;
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let admin: Record<string, string>;
@@ -84,8 +80,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => stand.listen(5296, '127.0.0.1', r));
 
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

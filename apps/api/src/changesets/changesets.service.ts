@@ -1,11 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '../http/errors';
 import type { ChangeSet, Prisma } from '@zapx/db';
 import { diffSurveys, simulateSurvey } from '@zapx/logic-engine';
 import { parseSurveyDefinition, type SurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
-import { SurveysService } from '../surveys/surveys.service';
+import { type SurveysService } from '../surveys/surveys.service';
 
 export interface NewChangeSet {
   source: 'AI' | 'IMPORT' | 'MANUAL';
@@ -26,7 +26,6 @@ const PREVIEW_RESPONDENTS = 200;
  * the full proposal, a structured diff, and the same schema, logic and QA checks a manual edit
  * gets. Applying requires a programmer and fails if the draft changed since the proposal was made.
  */
-@Injectable()
 export class ChangeSetsService {
   constructor(
     private readonly prisma: PrismaService,

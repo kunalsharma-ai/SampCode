@@ -1,14 +1,6 @@
-/**
- * Data quality: scores completes (online and CAPI) with @zapx/quality-core, keeps the evidence the
- * checks need (open-answer fingerprints, a keyed network hash), and runs the human review queue.
- *
- * A reviewer's rejection turns a complete into quality_fail: the quota place is released, the
- * vendor is told through the normal callback outbox, and the decision is audited. Rejection is
- * final, because the vendor may already have acted on it.
- */
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '../http/errors';
 import { createHmac } from 'node:crypto';
-import { Prisma, type Response } from '@zapx/db';
+import { type Prisma, type Response } from '@zapx/db';
 import { prepareSurvey } from '@zapx/logic-engine';
 import { releaseQuotaPlaces, takeQuotaPlaces } from '../quotas/quota-places';
 import {
@@ -25,13 +17,13 @@ import {
   type QualityResult,
 } from '@zapx/quality-core';
 import { allQuestions, qualitySettingsOf, type Answers, type SurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { WebhookService } from '../integrations/webhook.service';
-import { RedirectService } from '../integrations/redirect.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type WebhookService } from '../integrations/webhook.service';
+import { type RedirectService } from '../integrations/redirect.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CaptureService } from '../captures/capture.service';
+import { type CaptureService } from '../captures/capture.service';
 import { signingKey } from '../common/signing-keys';
 import { createManySkipDuplicates } from '../common/mongo-compat';
 
@@ -52,7 +44,6 @@ export const MAX_PAGE_MS = 30 * 60 * 1000;
 
 export type ReviewFilter = 'pending' | 'accepted' | 'rejected' | 'flagged';
 
-@Injectable()
 export class QualityService {
   constructor(
     private readonly prisma: PrismaService,

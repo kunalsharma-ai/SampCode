@@ -1,15 +1,16 @@
-import { Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService, isScoped } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService, isScoped } from '../common/access.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 
 const createSchema = z.object({ name: z.string().min(1).max(200), client: z.string().max(200).optional() });
 
-@Controller('projects')
 export class ProjectsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -17,8 +18,7 @@ export class ProjectsController {
     private readonly access: AccessService,
   ) {}
 
-  @Get()
-  list(@CurrentUser() user: AuthUser) {
+  list(user: AuthUser) {
     return this.prisma.project.findMany({
       where: this.access.projects(user),
       orderBy: { createdAt: 'desc' },
@@ -26,9 +26,7 @@ export class ProjectsController {
     });
   }
 
-  @Post()
-  @Roles(...CAN_EDIT)
-  async create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async create(user: AuthUser, body: unknown) {
     const input = parseBody(createSchema, body);
     const project = await this.prisma.project.create({
       // A member who only sees assigned projects is added to the project they create.
@@ -42,8 +40,7 @@ export class ProjectsController {
     return project;
   }
 
-  @Get(':id')
-  async get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async get(user: AuthUser, id: string) {
     const project = await this.prisma.project.findFirst({
       where: { id, ...this.access.projects(user) },
       include: {
@@ -63,10 +60,7 @@ export class ProjectsController {
    * Soft delete: the project, its surveys and vendors disappear from the studio and their links
    * stop working; responses, audit trail and logs are kept. Live surveys must be closed first.
    */
-  @Delete(':id')
-  @Roles('ADMIN')
-  @HttpCode(204)
-  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async remove(user: AuthUser, id: string) {
     const project = await this.prisma.project.findFirst({
       where: { id, ...this.access.projects(user) },
       include: { surveys: { where: { deletedAt: null } } },
@@ -83,8 +77,7 @@ export class ProjectsController {
     await this.audit.record(user, 'project.delete', 'project', id, { surveys: project.surveys.length });
   }
 
-  @Get(':id/audit')
-  async audit_(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async audit_(user: AuthUser, id: string) {
     const project = await this.prisma.project.findFirst({
       where: { id, ...this.access.projects(user), deletedAt: undefined },
       include: { surveys: true, vendors: true },
@@ -97,4 +90,34 @@ export class ProjectsController {
       take: 200,
     });
   }
+}
+
+/** Express routes of ProjectsController (mounted by src/http/app.ts). */
+export function projectsControllerRoutes(r: Router, c: ProjectsController, kit: RouteKit) {
+  r.get(
+    '/api/projects',
+    ...kit.route({ controller: 'ProjectsController', handler: 'list', method: 'get' }, (req) => c.list(req.user as AuthUser)),
+  );
+  r.post(
+    '/api/projects',
+    ...kit.route({ controller: 'ProjectsController', handler: 'create', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.create(req.user as AuthUser, req.body),
+    ),
+  );
+  r.get(
+    '/api/projects/:id',
+    ...kit.route({ controller: 'ProjectsController', handler: 'get', method: 'get' }, (req) => c.get(req.user as AuthUser, req.params.id)),
+  );
+  r.delete(
+    '/api/projects/:id',
+    ...kit.route({ controller: 'ProjectsController', handler: 'remove', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/projects/:id/audit',
+    ...kit.route({ controller: 'ProjectsController', handler: 'audit_', method: 'get' }, (req) =>
+      c.audit_(req.user as AuthUser, req.params.id),
+    ),
+  );
 }

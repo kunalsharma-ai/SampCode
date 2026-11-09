@@ -1,4 +1,4 @@
-import type { JwtService } from '@nestjs/jwt';
+import type { JwtService } from '../http/jwt';
 import type { Request, Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import { config } from '../config';

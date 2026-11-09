@@ -1,11 +1,5 @@
-/**
- * All database access of the Redirect & Vendor Integration module. Nothing else in the module
- * touches Prisma, so the module can move to its own service and database (or another ORM) by
- * re-implementing this one class.
- */
-import { Injectable } from '@nestjs/common';
 import type { CallbackState, OutboundCallback, Prisma, Project, Response, Tenant, Vendor } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { claim, createManySkipDuplicates } from '../common/mongo-compat';
 
 export interface VendorContext {
@@ -49,7 +43,6 @@ export interface AttemptLog {
   ms: number;
 }
 
-@Injectable()
 export class RedirectRepository {
   constructor(private readonly prisma: PrismaService) {}
 

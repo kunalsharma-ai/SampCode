@@ -1,8 +1,3 @@
-/**
- * Sends one callback request. Protects against SSRF: unless explicitly allowed (development and
- * tests), callbacks may only go to public addresses, and redirects are never followed.
- */
-import { Injectable } from '@nestjs/common';
 import type { HttpRequestSpec } from '@zapx/redirect-core';
 import { config } from '../config';
 import { guardedFetch, isBlockedAddressError } from '../common/net-guard';
@@ -18,7 +13,6 @@ export interface DeliveryResult {
   permanent?: boolean;
 }
 
-@Injectable()
 export class HttpDelivery {
   async send(spec: HttpRequestSpec): Promise<DeliveryResult> {
     const started = Date.now();

@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHash, randomBytes } from 'node:crypto';
 import type { StoredFile } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { FileStore } from './file-store';
+import { type PrismaService } from '../common/prisma.service';
+import { type FileStore } from './file-store';
 
 export interface SaveFile {
   tenantId: string;
@@ -17,7 +18,6 @@ export interface SaveFile {
 }
 
 /** Stored files: metadata in the database, bytes in the FileStore, always with an expiry. */
-@Injectable()
 export class FilesService {
   private readonly log = new Logger('Files');
 

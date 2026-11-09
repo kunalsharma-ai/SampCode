@@ -1,14 +1,16 @@
-import { Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import { NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import { config } from '../config';
-import { SecretBox } from '../platform/secret-box';
+import { type SecretBox } from '../platform/secret-box';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Roles } from '../auth/decorators';
+
 import { newWebhookSecret } from './webhook-signing';
-import { WEBHOOK_EVENTS, WebhookService } from './webhook.service';
+import { WEBHOOK_EVENTS, type WebhookService } from './webhook.service';
 
 const url = z
   .string()
@@ -35,8 +37,6 @@ const updateSchema = z.object({
 const SELECT = { id: true, url: true, description: true, events: true, active: true, createdAt: true, updatedAt: true } as const;
 
 /** Outbound webhooks for the organization (Milestone 6). Admins only; see docs/modules/webhooks.md. */
-@Controller()
-@Roles('ADMIN')
 export class WebhooksController {
   constructor(
     private readonly prisma: PrismaService,
@@ -51,13 +51,11 @@ export class WebhooksController {
     return w;
   }
 
-  @Get('webhook-events')
   events() {
     return WEBHOOK_EVENTS;
   }
 
-  @Get('webhooks')
-  async list(@CurrentUser() user: AuthUser) {
+  async list(user: AuthUser) {
     const [hooks, counts] = await Promise.all([
       this.prisma.webhook.findMany({ where: { tenantId: user.tenantId }, select: SELECT, orderBy: { createdAt: 'asc' } }),
       this.prisma.webhookDelivery.groupBy({ by: ['webhookId', 'state'], where: { tenantId: user.tenantId }, _count: { _all: true } }),
@@ -68,8 +66,7 @@ export class WebhooksController {
     }));
   }
 
-  @Post('webhooks')
-  async create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async create(user: AuthUser, body: unknown) {
     const input = parseBody(createSchema, body);
     const secret = newWebhookSecret();
     const hook = await this.prisma.webhook.create({
@@ -88,8 +85,7 @@ export class WebhooksController {
     return { ...hook, secret };
   }
 
-  @Patch('webhooks/:id')
-  async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async update(user: AuthUser, id: string, body: unknown) {
     const before = await this.own(user, id);
     const input = parseBody(updateSchema, body);
     const hook = await this.prisma.webhook.update({ where: { id }, data: input, select: SELECT });
@@ -100,8 +96,7 @@ export class WebhooksController {
     return hook;
   }
 
-  @Post('webhooks/:id/rotate-secret')
-  async rotate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async rotate(user: AuthUser, id: string) {
     await this.own(user, id);
     const secret = newWebhookSecret();
     await this.prisma.webhook.update({ where: { id }, data: { secretEnc: this.box.seal(secret) } });
@@ -109,24 +104,20 @@ export class WebhooksController {
     return { secret };
   }
 
-  @Delete('webhooks/:id')
-  @HttpCode(204)
-  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async remove(user: AuthUser, id: string) {
     const w = await this.own(user, id);
     await this.prisma.webhook.delete({ where: { id } });
     await this.audit.record(user, 'webhook.delete', 'webhook', id, { url: w.url });
   }
 
-  @Post('webhooks/:id/test')
-  async test(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async test(user: AuthUser, id: string) {
     await this.own(user, id);
     const d = await this.webhooks.test(user.tenantId, id);
     void this.webhooks.deliverDue().catch(() => undefined);
     return { deliveryId: d.id };
   }
 
-  @Get('webhooks/:id/deliveries')
-  async deliveries(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async deliveries(user: AuthUser, id: string) {
     await this.own(user, id);
     return this.prisma.webhookDelivery.findMany({
       where: { webhookId: id },
@@ -146,8 +137,7 @@ export class WebhooksController {
     });
   }
 
-  @Post('webhook-deliveries/:id/redeliver')
-  async redeliver(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async redeliver(user: AuthUser, id: string) {
     const d = await this.prisma.webhookDelivery.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!d) throw new NotFoundException('Delivery not found');
     const updated = await this.prisma.webhookDelivery.update({
@@ -159,4 +149,60 @@ export class WebhooksController {
     void this.webhooks.deliverDue().catch(() => undefined);
     return updated;
   }
+}
+
+/** Express routes of WebhooksController (mounted by src/http/app.ts). */
+export function webhooksControllerRoutes(r: Router, c: WebhooksController, kit: RouteKit) {
+  r.get(
+    '/api/webhook-events',
+    ...kit.route({ controller: 'WebhooksController', handler: 'events', method: 'get', roles: ['ADMIN'] }, () => c.events()),
+  );
+  r.get(
+    '/api/webhooks',
+    ...kit.route({ controller: 'WebhooksController', handler: 'list', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.list(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/webhooks',
+    ...kit.route({ controller: 'WebhooksController', handler: 'create', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.create(req.user as AuthUser, req.body),
+    ),
+  );
+  r.patch(
+    '/api/webhooks/:id',
+    ...kit.route({ controller: 'WebhooksController', handler: 'update', method: 'patch', roles: ['ADMIN'] }, (req) =>
+      c.update(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/webhooks/:id/rotate-secret',
+    ...kit.route({ controller: 'WebhooksController', handler: 'rotate', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.rotate(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.delete(
+    '/api/webhooks/:id',
+    ...kit.route({ controller: 'WebhooksController', handler: 'remove', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/webhooks/:id/test',
+    ...kit.route({ controller: 'WebhooksController', handler: 'test', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.test(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/webhooks/:id/deliveries',
+    ...kit.route({ controller: 'WebhooksController', handler: 'deliveries', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.deliveries(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/webhook-deliveries/:id/redeliver',
+    ...kit.route({ controller: 'WebhooksController', handler: 'redeliver', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.redeliver(req.user as AuthUser, req.params.id),
+    ),
+  );
 }

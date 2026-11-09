@@ -1,9 +1,3 @@
-/**
- * Response exports. One row per respondent, one column per variable, with answer codes (not
- * labels) so the data is analysis-ready. Multiple choice becomes one 0/1 column per option;
- * grids become one column per row. The codebook sheet (XLSX) documents every code.
- */
-import { Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import type { Response, SurveyVersion } from '@zapx/db';
 import { EYETRACK_STATUSES, allQuestions, parseEyeTrack, type Answers, type SurveyDefinition } from '@zapx/survey-schema';
@@ -51,7 +45,6 @@ export function csvEscape(v: string | number | null): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-@Injectable()
 export class ExportService {
   /** Columns are the union across every version answered, so data from all versions lines up. */
   columns(versions: Pick<SurveyVersion, 'definition'>[]): Column[] {

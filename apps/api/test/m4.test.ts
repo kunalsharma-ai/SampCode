@@ -17,19 +17,15 @@ vi.hoisted(() => {
   process.env.AI_PRICING = JSON.stringify({ 'fake-model': { input: 4, output: 20 } });
 });
 
-import 'reflect-metadata';
 import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { signRequest } from '@zapx/redirect-core';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { CallbackWorker } from '../src/integrations/callback.worker';
 import { isPrivateAddress } from '../src/integrations/http-delivery';
@@ -106,7 +102,7 @@ const fakeAi = new FakeAi();
 
 // ---- App -----------------------------------------------------------------------------------
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let worker: CallbackWorker;
@@ -191,11 +187,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => mock.listen(0, '127.0.0.1', r));
   mockBase = `http://127.0.0.1:${(mock.address() as AddressInfo).port}`;
 
-  const mod = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AiProvider)
-    .useValue(fakeAi)
-    .compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp({ overrides: [[AiProvider, fakeAi]] });
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

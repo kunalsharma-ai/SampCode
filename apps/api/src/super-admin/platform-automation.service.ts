@@ -1,13 +1,15 @@
-import { Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
+import type { OnModuleDestroy, OnModuleInit } from '../http/lifecycle';
 import type { PlatformAutomation, Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { PlanService } from '../plans/plan.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PlanService } from '../plans/plan.service';
 import { config } from '../config';
 import { emailProvider } from '../distribution/mailer';
 import type { AuthUser } from '../auth/auth.types';
-import { PlanCatalogService } from './plan-catalog.service';
-import { EntitlementsService } from './entitlements.service';
+import { type PlanCatalogService } from './plan-catalog.service';
+import { type EntitlementsService } from './entitlements.service';
 import { readOverrides } from './features';
 import {
   actionSchema,
@@ -64,7 +66,6 @@ function readRule(r: PlatformAutomation): AutomationInput & { id: string } {
  * run this at the same time: a firing is claimed by inserting its run row, which is unique per rule
  * and dedupe key, so only one process acts on it.
  */
-@Injectable()
 export class PlatformAutomationService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('PlatformAutomation');
   private timer?: NodeJS.Timeout;

@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { parseBody } from '../common/validation';
-import { QualityService, type ReviewFilter } from './quality.service';
+import { type QualityService, type ReviewFilter } from './quality.service';
 
 const decisionSchema = z.object({
   responseIds: z.array(z.string().min(1).max(64)).min(1).max(500),
@@ -16,45 +17,72 @@ const decisionSchema = z.object({
 const FILTERS: ReviewFilter[] = ['pending', 'accepted', 'rejected', 'flagged'];
 
 /** Quality review queue and fieldwork dashboard for one survey. */
-@Controller('surveys/:id')
 export class QualityController {
   constructor(private readonly quality: QualityService) {}
 
-  @Get('quality')
-  queue(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('filter') filter?: string, @Query('take') take?: string) {
+  queue(user: AuthUser, id: string, filter?: string, take?: string) {
     const f = FILTERS.includes(filter as ReviewFilter) ? (filter as ReviewFilter) : 'pending';
     return this.quality.queue(user, id, f, Math.min(500, Math.max(1, Number(take) || 100)));
   }
 
   /** Accept or reject completes. Rejecting is final: the quota place is released and the vendor is told quality_fail. */
-  @Post('quality/decisions')
-  @HttpCode(200)
-  @Roles(...CAN_EDIT)
-  decide(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  decide(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(decisionSchema, body);
     return this.quality.decide(user, id, [...new Set(input.responseIds)], input.decision, input.note || undefined, input.block === true);
   }
 
-  @Get('fieldwork')
-  fieldwork(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  fieldwork(user: AuthUser, id: string) {
     return this.quality.fieldwork(user, id);
   }
 }
 
 /** The organization's block list of devices and networks (Milestone 12). Administrators only. */
-@Controller('quality/blocks')
-@Roles('ADMIN')
 export class FraudBlocksController {
   constructor(private readonly quality: QualityService) {}
 
-  @Get()
-  list(@CurrentUser() user: AuthUser) {
+  list(user: AuthUser) {
     return this.quality.blocks(user);
   }
 
-  @Delete(':blockId')
-  @HttpCode(204)
-  async remove(@CurrentUser() user: AuthUser, @Param('blockId') blockId: string) {
+  async remove(user: AuthUser, blockId: string) {
     await this.quality.unblock(user, blockId);
   }
+}
+
+/** Express routes of QualityController (mounted by src/http/app.ts). */
+export function qualityControllerRoutes(r: Router, c: QualityController, kit: RouteKit) {
+  r.get(
+    '/api/surveys/:id/quality',
+    ...kit.route({ controller: 'QualityController', handler: 'queue', method: 'get' }, (req) =>
+      c.queue(req.user as AuthUser, req.params.id, req.query.filter as string, req.query.take as string),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/quality/decisions',
+    ...kit.route({ controller: 'QualityController', handler: 'decide', method: 'post', status: 200, roles: [...CAN_EDIT] }, (req) =>
+      c.decide(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/fieldwork',
+    ...kit.route({ controller: 'QualityController', handler: 'fieldwork', method: 'get' }, (req) =>
+      c.fieldwork(req.user as AuthUser, req.params.id),
+    ),
+  );
+}
+
+/** Express routes of FraudBlocksController (mounted by src/http/app.ts). */
+export function fraudBlocksControllerRoutes(r: Router, c: FraudBlocksController, kit: RouteKit) {
+  r.get(
+    '/api/quality/blocks',
+    ...kit.route({ controller: 'FraudBlocksController', handler: 'list', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.list(req.user as AuthUser),
+    ),
+  );
+  r.delete(
+    '/api/quality/blocks/:blockId',
+    ...kit.route({ controller: 'FraudBlocksController', handler: 'remove', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.blockId),
+    ),
+  );
 }

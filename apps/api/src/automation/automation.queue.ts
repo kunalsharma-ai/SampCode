@@ -1,18 +1,11 @@
-/**
- * Blueprint phase 5: turns a survey event into automation runs, one per enabled rule listening to
- * it. Runs are worked by the background worker (AutomationService.pass), so an event never waits
- * for a rule's actions, and enqueue() never throws: an automation problem must not affect an
- * interview or a studio action.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import type { Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { RULE_EVENTS } from './automation-rules';
 
 /** Events caused by an automation's own action carry this, and never fire rules again (no loops). */
 export const CAUSED_BY_AUTOMATION = 'automation';
 
-@Injectable()
 export class AutomationQueue {
   private readonly log = new Logger('Automation');
 

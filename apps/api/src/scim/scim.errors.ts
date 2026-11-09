@@ -1,5 +1,5 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/common';
 import type { Response } from 'express';
+import { HttpException } from '../http/errors';
 
 export const SCIM_ERROR = 'urn:ietf:params:scim:api:messages:2.0:Error';
 export const SCIM_CONTENT_TYPE = 'application/scim+json';
@@ -12,10 +12,8 @@ export class ScimError extends HttpException {
 }
 
 /** Every error from the SCIM endpoints is answered in SCIM's error format. */
-@Catch()
-export class ScimExceptionFilter implements ExceptionFilter {
-  catch(err: unknown, host: ArgumentsHost) {
-    const res = host.switchToHttp().getResponse<Response>();
+export class ScimExceptionFilter {
+  catch(err: unknown, res: Response) {
     let status = 500;
     let body: Record<string, unknown> = { schemas: [SCIM_ERROR], status: '500', detail: 'Internal error' };
     if (err instanceof ScimError) {

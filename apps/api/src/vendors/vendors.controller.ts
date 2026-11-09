@@ -1,16 +1,18 @@
-import { Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, Put } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { randomBytes } from 'node:crypto';
 import { REDIRECT_PRESETS, REDIRECT_STATUSES, isAllowedReturnUrl } from '@zapx/redirect-core';
 import { z } from 'zod';
 import type { Prisma, Vendor } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser, RoleName } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
-import { RedirectService } from '../integrations/redirect.service';
-import { SecretBox } from '../platform/secret-box';
+import { CAN_EDIT } from '../auth/decorators';
+import { type RedirectService } from '../integrations/redirect.service';
+import { type SecretBox } from '../platform/secret-box';
 import { URL_TEMPLATE, countryRulesSchema, statusMap } from '../integrations/integration-config';
 
 const httpsBase = z
@@ -89,7 +91,6 @@ export function presentVendor(v: Vendor, user: Pick<AuthUser, 'role' | 'superAdm
 }
 
 /** Sample vendors, their redirect and callback configuration and redirect QA (preview). */
-@Controller()
 export class VendorsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -135,13 +136,11 @@ export class VendorsController {
     };
   }
 
-  @Get('vendor-presets')
   presets() {
     return REDIRECT_PRESETS;
   }
 
-  @Get('projects/:projectId/vendors')
-  async list(@CurrentUser() user: AuthUser, @Param('projectId') projectId: string) {
+  async list(user: AuthUser, projectId: string) {
     const rows = await this.prisma.vendor.findMany({
       where: { projectId, ...this.access.vendors(user) },
       orderBy: { createdAt: 'asc' },
@@ -149,9 +148,7 @@ export class VendorsController {
     return rows.map((v) => presentVendor(v, user));
   }
 
-  @Post('projects/:projectId/vendors')
-  @Roles(...CAN_EDIT)
-  async create(@CurrentUser() user: AuthUser, @Param('projectId') projectId: string, @Body() body: unknown) {
+  async create(user: AuthUser, projectId: string, body: unknown) {
     const project = await this.prisma.project.findFirst({ where: { id: projectId, ...this.access.projects(user) } });
     if (!project) throw new NotFoundException('Project not found');
     const data = this.toData(parseBody(vendorSchema, body));
@@ -170,14 +167,11 @@ export class VendorsController {
     return presentVendor(vendor, user);
   }
 
-  @Get('vendors/:id')
-  async get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async get(user: AuthUser, id: string) {
     return presentVendor(await this.own(user, id), user);
   }
 
-  @Put('vendors/:id')
-  @Roles(...CAN_EDIT)
-  async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async update(user: AuthUser, id: string, body: unknown) {
     const before = await this.own(user, id);
     const data = this.toData(parseBody(vendorSchema, body));
     if (data.code !== before.code) {
@@ -193,18 +187,13 @@ export class VendorsController {
   }
 
   /** Soft delete: links stop working, history (responses, redirects, callbacks) is kept. */
-  @Delete('vendors/:id')
-  @Roles(...CAN_EDIT)
-  @HttpCode(204)
-  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async remove(user: AuthUser, id: string) {
     await this.own(user, id);
     await this.prisma.vendor.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.record(user, 'vendor.delete', 'vendor', id);
   }
 
-  @Post('vendors/:id/rotate-secret')
-  @Roles(...CAN_EDIT)
-  async rotate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async rotate(user: AuthUser, id: string) {
     await this.own(user, id);
     const vendor = await this.prisma.vendor.update({ where: { id }, data: { secret: randomBytes(32).toString('hex') } });
     await this.audit.record(user, 'vendor.rotate_secret', 'vendor', id);
@@ -212,8 +201,7 @@ export class VendorsController {
   }
 
   /** Redirect QA: show exactly where a respondent would be sent for each status. */
-  @Post('vendors/:id/redirect-preview')
-  async preview(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async preview(user: AuthUser, id: string, body: unknown) {
     const vendor = await this.own(user, id);
     const input = parseBody(previewSchema, body);
     const returnUrl = input.returnUrl ?? null;
@@ -224,4 +212,49 @@ export class VendorsController {
     );
     return { ...resolved, returnUrlAccepted: returnUrl ? isAllowedReturnUrl(returnUrl, vendor.dynamicAllowedHosts) : null };
   }
+}
+
+/** Express routes of VendorsController (mounted by src/http/app.ts). */
+export function vendorsControllerRoutes(r: Router, c: VendorsController, kit: RouteKit) {
+  r.get('/api/vendor-presets', ...kit.route({ controller: 'VendorsController', handler: 'presets', method: 'get' }, () => c.presets()));
+  r.get(
+    '/api/projects/:projectId/vendors',
+    ...kit.route({ controller: 'VendorsController', handler: 'list', method: 'get' }, (req) =>
+      c.list(req.user as AuthUser, req.params.projectId),
+    ),
+  );
+  r.post(
+    '/api/projects/:projectId/vendors',
+    ...kit.route({ controller: 'VendorsController', handler: 'create', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.create(req.user as AuthUser, req.params.projectId, req.body),
+    ),
+  );
+  r.get(
+    '/api/vendors/:id',
+    ...kit.route({ controller: 'VendorsController', handler: 'get', method: 'get' }, (req) => c.get(req.user as AuthUser, req.params.id)),
+  );
+  r.put(
+    '/api/vendors/:id',
+    ...kit.route({ controller: 'VendorsController', handler: 'update', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.update(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.delete(
+    '/api/vendors/:id',
+    ...kit.route({ controller: 'VendorsController', handler: 'remove', method: 'delete', status: 204, roles: [...CAN_EDIT] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/vendors/:id/rotate-secret',
+    ...kit.route({ controller: 'VendorsController', handler: 'rotate', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.rotate(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/vendors/:id/redirect-preview',
+    ...kit.route({ controller: 'VendorsController', handler: 'preview', method: 'post' }, (req) =>
+      c.preview(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
 }

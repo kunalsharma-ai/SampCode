@@ -1,12 +1,13 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
-import { SurveysService } from '../surveys/surveys.service';
-import { QaService } from './qa.service';
+import { CAN_EDIT } from '../auth/decorators';
+import { type SurveysService } from '../surveys/surveys.service';
+import { type QaService } from './qa.service';
 
 /** Upper bound for one run inside a request; up to MAX_QA_JOB_RESPONDENTS run as a background job. */
 export const MAX_QA_RESPONDENTS = 2000;
@@ -25,7 +26,6 @@ const runSchema = qaRunSchema(MAX_QA_RESPONDENTS);
  * QA Laboratory: simulate synthetic respondents through a version of the survey, using the same
  * logic engine as live interviews, and keep the report. Runs never create responses or touch quotas.
  */
-@Controller()
 export class QaController {
   constructor(
     private readonly prisma: PrismaService,
@@ -33,15 +33,11 @@ export class QaController {
     private readonly qa: QaService,
   ) {}
 
-  @Post('surveys/:id/qa/run')
-  @Roles(...CAN_EDIT)
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  async run(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async run(user: AuthUser, id: string, body: unknown) {
     return this.qa.run(user, id, parseBody(runSchema, body ?? {}));
   }
 
-  @Get('surveys/:id/qa/runs')
-  async list(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async list(user: AuthUser, id: string) {
     await this.surveys.getSurvey(user, id);
     return this.prisma.qaRun.findMany({
       where: { surveyId: id, tenantId: user.tenantId },
@@ -51,8 +47,7 @@ export class QaController {
     });
   }
 
-  @Get('qa/runs/:runId')
-  async get(@CurrentUser() user: AuthUser, @Param('runId') runId: string) {
+  async get(user: AuthUser, runId: string) {
     const run = await this.prisma.qaRun.findFirst({ where: { id: runId, tenantId: user.tenantId } });
     if (!run) throw new NotFoundException('QA run not found');
     await this.surveys.getSurvey(user, run.surveyId).catch(() => {
@@ -60,4 +55,23 @@ export class QaController {
     });
     return run;
   }
+}
+
+/** Express routes of QaController (mounted by src/http/app.ts). */
+export function qaControllerRoutes(r: Router, c: QaController, kit: RouteKit) {
+  r.post(
+    '/api/surveys/:id/qa/run',
+    ...kit.route(
+      { controller: 'QaController', handler: 'run', method: 'post', roles: [...CAN_EDIT], throttle: { limit: 30, ttl: 60_000 } },
+      (req) => c.run(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/qa/runs',
+    ...kit.route({ controller: 'QaController', handler: 'list', method: 'get' }, (req) => c.list(req.user as AuthUser, req.params.id)),
+  );
+  r.get(
+    '/api/qa/runs/:runId',
+    ...kit.route({ controller: 'QaController', handler: 'get', method: 'get' }, (req) => c.get(req.user as AuthUser, req.params.runId)),
+  );
 }

@@ -1,13 +1,13 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Response as ExpressResponse } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import { csvEscape } from '../exports/export.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Roles } from '../auth/decorators';
 
 const EXPORT_LIMIT = 50_000;
 
@@ -29,8 +29,6 @@ type Filter = z.infer<typeof filterSchema>;
  * members, keys, webhooks, quality decisions and settings. Admins only. Read-only: nothing in
  * SampCode can edit or delete audit events.
  */
-@Controller('audit')
-@Roles('ADMIN')
 export class AuditLogController {
   constructor(
     private readonly prisma: PrismaService,
@@ -56,8 +54,7 @@ export class AuditLogController {
     return new Map(users.map((u) => [u.id, u]));
   }
 
-  @Get()
-  async list(@CurrentUser() user: AuthUser, @Query() query: Record<string, string>) {
+  async list(user: AuthUser, query: Record<string, string>) {
     const f = parseBody(filterSchema, query);
     const rows = await this.prisma.auditEvent.findMany({
       where: this.where(user, f),
@@ -80,8 +77,7 @@ export class AuditLogController {
   }
 
   /** Distinct action names, for the filter. */
-  @Get('actions')
-  async actions(@CurrentUser() user: AuthUser) {
+  async actions(user: AuthUser) {
     const rows = await this.prisma.auditEvent.findMany({
       where: { tenantId: user.tenantId },
       distinct: ['action'],
@@ -90,8 +86,7 @@ export class AuditLogController {
     return rows.map((r) => r.action).sort();
   }
 
-  @Get('export.csv')
-  async export(@CurrentUser() user: AuthUser, @Query() query: Record<string, string>, @Res() res: ExpressResponse) {
+  async export(user: AuthUser, query: Record<string, string>, res: ExpressResponse) {
     const f = parseBody(filterSchema, query);
     const rows = await this.prisma.auditEvent.findMany({
       where: this.where(user, f),
@@ -125,8 +120,33 @@ export class AuditLogController {
   }
 
   /** Security posture an admin should know about. */
-  @Get('security')
   security() {
     return { rowLevelSecurity: this.prisma.rls };
   }
+}
+
+/** Express routes of AuditLogController (mounted by src/http/app.ts). */
+export function auditLogControllerRoutes(r: Router, c: AuditLogController, kit: RouteKit) {
+  r.get(
+    '/api/audit',
+    ...kit.route({ controller: 'AuditLogController', handler: 'list', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.list(req.user as AuthUser, req.query as unknown as Record<string, string>),
+    ),
+  );
+  r.get(
+    '/api/audit/actions',
+    ...kit.route({ controller: 'AuditLogController', handler: 'actions', method: 'get', roles: ['ADMIN'] }, (req) =>
+      c.actions(req.user as AuthUser),
+    ),
+  );
+  r.get(
+    '/api/audit/export.csv',
+    ...kit.route({ controller: 'AuditLogController', handler: 'export', method: 'get', roles: ['ADMIN'], raw: true }, (req, res) =>
+      c.export(req.user as AuthUser, req.query as unknown as Record<string, string>, res),
+    ),
+  );
+  r.get(
+    '/api/audit/security',
+    ...kit.route({ controller: 'AuditLogController', handler: 'security', method: 'get', roles: ['ADMIN'] }, () => c.security()),
+  );
 }

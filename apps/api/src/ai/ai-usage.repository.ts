@@ -1,12 +1,9 @@
-/** Database access of the AI gateway: tenant AI policy and the usage ledger. */
-import { Injectable } from '@nestjs/common';
 import type { Prisma, TenantAiPolicy } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 
 /** Outcomes that reached (or would have reached) the provider and count toward rate limits. */
 export const BILLABLE_OUTCOMES = ['ok', 'error', 'refused'];
 
-@Injectable()
 export class AiUsageRepository {
   constructor(private readonly prisma: PrismaService) {}
 

@@ -13,21 +13,17 @@ vi.hoisted(() => {
   process.env.NETWORK_REPUTATION_TIMEOUT_MS = '500';
 });
 
-import 'reflect-metadata';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assessQuality } from '@zapx/quality-core';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { IpinfoProvider, NetworkReputationService, isPrivateAddress } from '../src/quality/network-reputation.service';
 
 const run = `m16${Date.now().toString(36)}`;
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let reputation: NetworkReputationService;
@@ -75,8 +71,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => ipinfo.listen(0, '127.0.0.1', r));
 
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

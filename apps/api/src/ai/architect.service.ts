@@ -1,8 +1,7 @@
-import { Injectable } from '@nestjs/common';
 import { analyzeSurvey } from '@zapx/logic-engine';
 import { parseSurveyDefinition, type SurveyDefinition } from '@zapx/survey-schema';
-import { AiError, AiProvider, type AiDocument, type ArchitectResult } from './ai-provider';
-import { AiGateway, type AiActor } from './ai-gateway';
+import { AiError, type AiProvider, type AiDocument, type ArchitectResult } from './ai-provider';
+import { type AiGateway, type AiActor } from './ai-gateway';
 import { redactPii } from './redact';
 
 export interface ArchitectOutcome {
@@ -44,7 +43,6 @@ export function problemsIn(json: string): { definition: SurveyDefinition | null;
  * same schema and logic analysis as a manual edit, and gives the model one chance to fix what
  * failed. The result is only a proposal; it becomes a change set for a programmer to review.
  */
-@Injectable()
 export class ArchitectService {
   constructor(
     private readonly ai: AiProvider,

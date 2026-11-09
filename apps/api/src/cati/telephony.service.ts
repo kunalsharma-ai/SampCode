@@ -1,40 +1,21 @@
-/**
- * Phone dialer for CATI (Milestone 19).
- *
- * The interviewer presses Call. SampCode asks the telephony provider to ring the interviewer's own phone;
- * when they answer, the provider asks SampCode what to do and is told to dial the respondent from the
- * organization's caller id and bridge the two. The respondent's number goes from SampCode to the provider
- * only: on surveys that use the dialer, interviewers never see it.
- *
- * - Off by default (TELEPHONY=off), and off per survey until a programmer turns it on.
- * - Recording is a separate per-survey choice. The respondent hears a notice before the call is
- *   connected. The recording is copied into SampCode as a private capture of the interview (same access,
- *   retention and erasure as CAPI recordings) and then deleted at the provider. A call without an
- *   interview keeps no recording.
- * - Provider: Twilio Programmable Voice (REST API + TwiML webhooks signed with X-Twilio-Signature).
- *   Another provider is one class plus its webhook routes.
- *
- * Tested against a local stand-in of the Twilio API only.
- */
 import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
-  Injectable,
-  Logger,
   NotFoundException,
   ServiceUnavailableException,
-} from '@nestjs/common';
+} from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { CatiDial } from '@zapx/db';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { SecretBox } from '../platform/secret-box';
-import { CaptureService, checkCapture } from '../captures/capture.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type SecretBox } from '../platform/secret-box';
+import { type CaptureService, checkCapture } from '../captures/capture.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CatiService, normalizePhone } from './cati.service';
+import { type CatiService, normalizePhone } from './cati.service';
 import { phoneHash } from './calling-rules';
 
 export class TelephonyError extends Error {}
@@ -144,7 +125,6 @@ const xml = (s: string) => s.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&g
 const twiml = (inner: string) => `<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`;
 const sayAndHangUp = (text: string) => twiml(`<Say>${xml(text)}</Say><Hangup/>`);
 
-@Injectable()
 export class TelephonyService {
   private readonly log = new Logger('Telephony');
   private provider: TelephonyProvider | null | undefined;

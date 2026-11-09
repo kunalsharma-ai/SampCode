@@ -1,23 +1,13 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  NotFoundException,
-  Param,
-  Post,
-  Put,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@zapx/db';
 import { sanitizeAppearance, validateAppearance, type Appearance } from '@zapx/quantum';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
-import { ALL_ROLES, CurrentUser, Roles } from '../auth/decorators';
+import { ALL_ROLES } from '../auth/decorators';
 
 /** Stored JSON is `{}` until something is saved; anything else is read tolerantly. */
 function storedAppearance(json: unknown): Appearance | null {
@@ -37,8 +27,6 @@ function checked(body: unknown): Appearance {
  * Quantum Design System appearance. Every member keeps their own appearance (theme, mode, density,
  * motion...) across devices; admins set the organization default used until a member picks their own.
  */
-@Controller()
-@Roles(...ALL_ROLES)
 export class PreferencesController {
   constructor(
     private readonly prisma: PrismaService,
@@ -46,8 +34,7 @@ export class PreferencesController {
   ) {}
 
   /** The member's own appearance (null when never saved) and the organization default (null when unset). */
-  @Get('me/preferences')
-  async get(@CurrentUser() user: AuthUser) {
+  async get(user: AuthUser) {
     const u = await this.prisma.user.findUniqueOrThrow({
       where: { id: user.id },
       select: { preferences: true, tenant: { select: { appearanceDefaults: true } } },
@@ -56,8 +43,7 @@ export class PreferencesController {
     return { appearance: storedAppearance(prefs.appearance), organizationDefault: storedAppearance(u.tenant.appearanceDefaults) };
   }
 
-  @Put('me/preferences')
-  async put(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async put(user: AuthUser, body: unknown) {
     if (user.apiKeyId) throw new ForbiddenException('Appearance belongs to a signed-in member, not an API key');
     const appearance = checked(body);
     const u = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { preferences: true } });
@@ -67,9 +53,7 @@ export class PreferencesController {
   }
 
   /** Forget the member's own choice so the organization default applies again. */
-  @Delete('me/preferences/appearance')
-  @HttpCode(204)
-  async reset(@CurrentUser() user: AuthUser) {
+  async reset(user: AuthUser) {
     if (user.apiKeyId) throw new ForbiddenException('Appearance belongs to a signed-in member, not an API key');
     const u = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { preferences: true } });
     const rest = { ...((u.preferences ?? {}) as Record<string, unknown>) };
@@ -77,9 +61,7 @@ export class PreferencesController {
     await this.prisma.user.update({ where: { id: user.id }, data: { preferences: rest as Prisma.InputJsonValue } });
   }
 
-  @Put('tenant/appearance')
-  @Roles('ADMIN')
-  async putDefault(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async putDefault(user: AuthUser, body: unknown) {
     const appearance = checked(body);
     await this.prisma.tenant.update({
       where: { id: user.tenantId },
@@ -92,10 +74,7 @@ export class PreferencesController {
     return { organizationDefault: appearance };
   }
 
-  @Delete('tenant/appearance')
-  @Roles('ADMIN')
-  @HttpCode(204)
-  async clearDefault(@CurrentUser() user: AuthUser) {
+  async clearDefault(user: AuthUser) {
     await this.prisma.tenant.update({ where: { id: user.tenantId }, data: { appearanceDefaults: {} } });
     await this.audit.record(user, 'tenant.appearance_default_cleared', 'tenant', user.tenantId);
   }
@@ -113,14 +92,11 @@ export class PreferencesController {
     });
   }
 
-  @Get('tenant/appearance-presets')
-  list(@CurrentUser() user: AuthUser) {
+  list(user: AuthUser) {
     return this.presets(user.tenantId);
   }
 
-  @Post('tenant/appearance-presets')
-  @Roles('ADMIN')
-  async addPreset(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async addPreset(user: AuthUser, body: unknown) {
     const name = typeof (body as { name?: unknown })?.name === 'string' ? (body as { name: string }).name.trim() : '';
     if (!name || name.length > 60) throw new BadRequestException('Give the preset a name (up to 60 characters)');
     const appearance = checked(body);
@@ -136,10 +112,7 @@ export class PreferencesController {
     return preset;
   }
 
-  @Delete('tenant/appearance-presets/:id')
-  @Roles('ADMIN')
-  @HttpCode(204)
-  async deletePreset(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async deletePreset(user: AuthUser, id: string) {
     const list = await this.presets(user.tenantId);
     const gone = list.find((p) => p.id === id);
     if (!gone) throw new NotFoundException('Preset not found');
@@ -157,4 +130,56 @@ interface WorkspacePreset {
   name: string;
   appearance: Appearance;
   createdAt: string;
+}
+
+/** Express routes of PreferencesController (mounted by src/http/app.ts). */
+export function preferencesControllerRoutes(r: Router, c: PreferencesController, kit: RouteKit) {
+  r.get(
+    '/api/me/preferences',
+    ...kit.route({ controller: 'PreferencesController', handler: 'get', method: 'get', roles: [...ALL_ROLES] }, (req) =>
+      c.get(req.user as AuthUser),
+    ),
+  );
+  r.put(
+    '/api/me/preferences',
+    ...kit.route({ controller: 'PreferencesController', handler: 'put', method: 'put', roles: [...ALL_ROLES] }, (req) =>
+      c.put(req.user as AuthUser, req.body),
+    ),
+  );
+  r.delete(
+    '/api/me/preferences/appearance',
+    ...kit.route({ controller: 'PreferencesController', handler: 'reset', method: 'delete', status: 204, roles: [...ALL_ROLES] }, (req) =>
+      c.reset(req.user as AuthUser),
+    ),
+  );
+  r.put(
+    '/api/tenant/appearance',
+    ...kit.route({ controller: 'PreferencesController', handler: 'putDefault', method: 'put', roles: ['ADMIN'] }, (req) =>
+      c.putDefault(req.user as AuthUser, req.body),
+    ),
+  );
+  r.delete(
+    '/api/tenant/appearance',
+    ...kit.route({ controller: 'PreferencesController', handler: 'clearDefault', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.clearDefault(req.user as AuthUser),
+    ),
+  );
+  r.get(
+    '/api/tenant/appearance-presets',
+    ...kit.route({ controller: 'PreferencesController', handler: 'list', method: 'get', roles: [...ALL_ROLES] }, (req) =>
+      c.list(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/tenant/appearance-presets',
+    ...kit.route({ controller: 'PreferencesController', handler: 'addPreset', method: 'post', roles: ['ADMIN'] }, (req) =>
+      c.addPreset(req.user as AuthUser, req.body),
+    ),
+  );
+  r.delete(
+    '/api/tenant/appearance-presets/:id',
+    ...kit.route({ controller: 'PreferencesController', handler: 'deletePreset', method: 'delete', status: 204, roles: ['ADMIN'] }, (req) =>
+      c.deletePreset(req.user as AuthUser, req.params.id),
+    ),
+  );
 }

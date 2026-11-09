@@ -1,29 +1,17 @@
-import {
-  Body,
-  ConflictException,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  NotFoundException,
-  Param,
-  ParseIntPipe,
-  Post,
-  Put,
-  Query,
-  Res,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import { intParam, type RouteKit } from '../http/routes';
 import type { Response as ExpressResponse } from 'express';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
-import { SurveysService } from './surveys.service';
+import { CAN_EDIT } from '../auth/decorators';
+import { type SurveysService } from './surveys.service';
 import { ExportRunner } from '../exports/export-runner.service';
 import { signParams } from '@zapx/redirect-core';
 import { testSignature } from '../interview/interview.service';
@@ -54,7 +42,6 @@ const linkSchema = z.object({
     .optional(),
 });
 
-@Controller()
 export class SurveysController {
   constructor(
     private readonly surveys: SurveysService,
@@ -64,25 +51,20 @@ export class SurveysController {
     private readonly access: AccessService,
   ) {}
 
-  @Get('projects/:projectId/surveys')
-  list(@CurrentUser() user: AuthUser, @Param('projectId') projectId: string) {
+  list(user: AuthUser, projectId: string) {
     return this.prisma.survey.findMany({ where: { projectId, ...this.access.surveys(user) }, orderBy: { createdAt: 'desc' } });
   }
 
-  @Post('projects/:projectId/surveys')
-  @Roles(...CAN_EDIT)
-  create(@CurrentUser() user: AuthUser, @Param('projectId') projectId: string, @Body() body: unknown) {
+  create(user: AuthUser, projectId: string, body: unknown) {
     const b = parseBody(createSchema, body);
     return this.surveys.create(user, projectId, b.name, { template: b.template, libraryItemId: b.libraryItemId });
   }
 
-  @Get('surveys/:id')
-  detail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  detail(user: AuthUser, id: string) {
     return this.surveys.detail(user, id);
   }
 
-  @Get('surveys/:id/draft')
-  async draft(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async draft(user: AuthUser, id: string) {
     const draft = user.role === 'VIEWER' ? await this.latest(user, id) : await this.surveys.draft(user, id);
     return { version: draft, check: this.surveys.check(draft.definition, draft.presentation) };
   }
@@ -92,81 +74,58 @@ export class SurveysController {
     return this.prisma.surveyVersion.findFirstOrThrow({ where: { surveyId: id }, orderBy: { version: 'desc' } });
   }
 
-  @Put('surveys/:id/draft')
-  @Roles(...CAN_EDIT)
-  saveDraft(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  saveDraft(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(draftSchema, body);
     return this.surveys.saveDraft(user, id, input.definition, input.expectedUpdatedAt);
   }
 
-  @Put('surveys/:id/draft/presentation')
-  @Roles(...CAN_EDIT)
-  savePresentation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  savePresentation(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(presentationBody, body);
     return this.surveys.savePresentation(user, id, input.presentation, input.expectedUpdatedAt);
   }
 
   /** Check any definition (e.g. unsaved edits) without saving it. */
-  @Post('surveys/:id/check')
-  async check(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async check(user: AuthUser, id: string, body: unknown) {
     await this.surveys.getSurvey(user, id);
     const input = parseBody(draftSchema, body);
     return this.surveys.check(input.definition, input.presentation);
   }
 
-  @Post('surveys/:id/publish')
-  @Roles(...CAN_EDIT)
-  publish(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  publish(user: AuthUser, id: string) {
     return this.surveys.publish(user, id);
   }
 
-  @Post('surveys/:id/status')
-  @Roles(...CAN_EDIT)
-  status(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  status(user: AuthUser, id: string, body: unknown) {
     return this.surveys.setStatus(user, id, parseBody(statusSchema, body).status);
   }
 
   /** Soft delete. A live survey must be paused or closed first. Responses are kept. */
-  @Delete('surveys/:id')
-  @Roles(...CAN_EDIT)
-  @HttpCode(204)
-  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async remove(user: AuthUser, id: string) {
     const survey = await this.surveys.getSurvey(user, id);
     if (survey.status === 'LIVE') throw new ConflictException('Pause or close the survey before deleting it');
     await this.prisma.survey.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.record(user, 'survey.delete', 'survey', id);
   }
 
-  @Get('surveys/:id/versions')
-  versions(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  versions(user: AuthUser, id: string) {
     return this.surveys.versions(user, id);
   }
 
-  @Get('surveys/:id/versions/:version')
-  version(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('version', ParseIntPipe) version: number) {
+  version(user: AuthUser, id: string, version: number) {
     return this.surveys.version(user, id, version);
   }
 
-  @Get('surveys/:id/quotas')
-  quotas(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  quotas(user: AuthUser, id: string) {
     return this.surveys.quotas(user, id);
   }
 
   /** Live quota adjustment: change a target without republishing (null restores the published one). */
-  @Put('surveys/:id/quotas/:quotaId')
-  @Roles(...CAN_EDIT)
-  setQuotaTarget(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('quotaId') quotaId: string, @Body() body: unknown) {
+  setQuotaTarget(user: AuthUser, id: string, quotaId: string, body: unknown) {
     const { target } = parseBody(quotaTargetSchema, body);
     return this.surveys.setQuotaTarget(user, id, quotaId, target);
   }
 
-  @Get('surveys/:id/responses')
-  responses(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Query('includeTest') includeTest?: string,
-    @Query('take') take?: string,
-  ) {
+  responses(user: AuthUser, id: string, includeTest?: string, take?: string) {
     return this.surveys.responses(user, id, { includeTest: includeTest === 'true', take: Math.min(500, Math.max(1, Number(take) || 100)) });
   }
 
@@ -174,9 +133,7 @@ export class SurveysController {
    * Build a survey link. Vendor links carry vid/uid/cc and, if the vendor requires it, an HMAC
    * signature. Test links are signed by SampCode, are flagged in the data and never count toward quotas.
    */
-  @Post('surveys/:id/links')
-  @Roles(...CAN_EDIT)
-  async link(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async link(user: AuthUser, id: string, body: unknown) {
     const survey = await this.surveys.getSurvey(user, id);
     const input = parseBody(linkSchema, body);
     const params: Record<string, string> = {};
@@ -218,15 +175,7 @@ export class SurveysController {
   }
 
   /** Direct download for small exports (up to EXPORT_SYNC_MAX_ROWS rows); larger ones run as jobs. */
-  @Get('surveys/:id/export')
-  async export(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Res() res: ExpressResponse,
-    @Query('format') format = 'csv',
-    @Query('includeTest') includeTest?: string,
-    @Query('status') status?: string,
-  ) {
+  async export(user: AuthUser, id: string, res: ExpressResponse, format = 'csv', includeTest?: string, status?: string) {
     const out = await this.exports.build(
       user,
       id,
@@ -241,4 +190,117 @@ export class SurveysController {
     res.setHeader('Content-Disposition', `attachment; filename="${out.name}"`);
     res.send(out.data);
   }
+}
+
+/** Express routes of SurveysController (mounted by src/http/app.ts). */
+export function surveysControllerRoutes(r: Router, c: SurveysController, kit: RouteKit) {
+  r.get(
+    '/api/projects/:projectId/surveys',
+    ...kit.route({ controller: 'SurveysController', handler: 'list', method: 'get' }, (req) =>
+      c.list(req.user as AuthUser, req.params.projectId),
+    ),
+  );
+  r.post(
+    '/api/projects/:projectId/surveys',
+    ...kit.route({ controller: 'SurveysController', handler: 'create', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.create(req.user as AuthUser, req.params.projectId, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id',
+    ...kit.route({ controller: 'SurveysController', handler: 'detail', method: 'get' }, (req) =>
+      c.detail(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/draft',
+    ...kit.route({ controller: 'SurveysController', handler: 'draft', method: 'get' }, (req) =>
+      c.draft(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/draft',
+    ...kit.route({ controller: 'SurveysController', handler: 'saveDraft', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.saveDraft(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/draft/presentation',
+    ...kit.route({ controller: 'SurveysController', handler: 'savePresentation', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.savePresentation(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/check',
+    ...kit.route({ controller: 'SurveysController', handler: 'check', method: 'post' }, (req) =>
+      c.check(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/publish',
+    ...kit.route({ controller: 'SurveysController', handler: 'publish', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.publish(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/status',
+    ...kit.route({ controller: 'SurveysController', handler: 'status', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.status(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.delete(
+    '/api/surveys/:id',
+    ...kit.route({ controller: 'SurveysController', handler: 'remove', method: 'delete', status: 204, roles: [...CAN_EDIT] }, (req) =>
+      c.remove(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/versions',
+    ...kit.route({ controller: 'SurveysController', handler: 'versions', method: 'get' }, (req) =>
+      c.versions(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/versions/:version',
+    ...kit.route({ controller: 'SurveysController', handler: 'version', method: 'get' }, (req) =>
+      c.version(req.user as AuthUser, req.params.id, intParam(req.params.version)),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/quotas',
+    ...kit.route({ controller: 'SurveysController', handler: 'quotas', method: 'get' }, (req) =>
+      c.quotas(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/quotas/:quotaId',
+    ...kit.route({ controller: 'SurveysController', handler: 'setQuotaTarget', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.setQuotaTarget(req.user as AuthUser, req.params.id, req.params.quotaId, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/responses',
+    ...kit.route({ controller: 'SurveysController', handler: 'responses', method: 'get' }, (req) =>
+      c.responses(req.user as AuthUser, req.params.id, req.query.includeTest as string, req.query.take as string),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/links',
+    ...kit.route({ controller: 'SurveysController', handler: 'link', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.link(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/export',
+    ...kit.route({ controller: 'SurveysController', handler: 'export', method: 'get', raw: true }, (req, res) =>
+      c.export(
+        req.user as AuthUser,
+        req.params.id,
+        res,
+        req.query.format as string | undefined,
+        req.query.includeTest as string,
+        req.query.status as string,
+      ),
+    ),
+  );
 }

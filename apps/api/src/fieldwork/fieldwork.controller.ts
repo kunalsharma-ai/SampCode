@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { parseBody } from '../common/validation';
-import { FieldworkService } from './fieldwork.service';
+import { type FieldworkService } from './fieldwork.service';
 
 const methodSchema = z.enum(['PHONE', 'VISIT', 'RECORDING']);
 const sampleSchema = z.object({
@@ -22,59 +23,101 @@ const appealSchema = z.object({ clientId: z.string().uuid(), message: z.string()
 const stateSchema = z.enum(['PENDING', 'VERIFIED', 'FAILED', 'UNREACHABLE']).optional();
 
 /** Supervisor tools in the studio: back-checks, the dashboard and appeals. */
-@Controller('surveys/:id')
 export class FieldworkController {
   constructor(private readonly fieldwork: FieldworkService) {}
 
-  @Get('supervisor')
-  supervisor(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  supervisor(user: AuthUser, id: string) {
     return this.fieldwork.supervisor(user, id);
   }
 
-  @Get('backchecks')
-  backChecks(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('state') state?: string) {
+  backChecks(user: AuthUser, id: string, state?: string) {
     return this.fieldwork.backChecks(user, id, parseBody(stateSchema, state?.toUpperCase() || undefined));
   }
 
-  @Post('backchecks/sample')
-  @Roles(...CAN_EDIT)
-  sample(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  sample(user: AuthUser, id: string, body: unknown) {
     return this.fieldwork.sample(user, id, parseBody(sampleSchema, body));
   }
 
-  @Put('backchecks/:checkId')
-  @Roles(...CAN_EDIT)
-  record(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('checkId') checkId: string, @Body() body: unknown) {
+  record(user: AuthUser, id: string, checkId: string, body: unknown) {
     return this.fieldwork.recordBackCheck(user, id, checkId, parseBody(recordSchema, body));
   }
 
-  @Get('appeals')
-  appeals(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  appeals(user: AuthUser, id: string) {
     return this.fieldwork.appeals(user, id);
   }
 
-  @Put('appeals/:appealId')
-  @Roles(...CAN_EDIT)
-  decide(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('appealId') appealId: string, @Body() body: unknown) {
+  decide(user: AuthUser, id: string, appealId: string, body: unknown) {
     const input = parseBody(decideSchema, body);
     return this.fieldwork.decideAppeal(user, id, appealId, input.decision, input.note);
   }
 }
 
 /** Appeals from the interviewer app. */
-@Controller('capi')
-@Roles('INTERVIEWER')
 export class CapiAppealsController {
   constructor(private readonly fieldwork: FieldworkService) {}
 
-  @Get('interviews')
-  mine(@CurrentUser() user: AuthUser) {
+  mine(user: AuthUser) {
     return this.fieldwork.myInterviews(user);
   }
 
-  @Post('appeals')
-  appeal(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  appeal(user: AuthUser, body: unknown) {
     const input = parseBody(appealSchema, body);
     return this.fieldwork.appeal(user, input.clientId, input.message);
   }
+}
+
+/** Express routes of FieldworkController (mounted by src/http/app.ts). */
+export function fieldworkControllerRoutes(r: Router, c: FieldworkController, kit: RouteKit) {
+  r.get(
+    '/api/surveys/:id/supervisor',
+    ...kit.route({ controller: 'FieldworkController', handler: 'supervisor', method: 'get' }, (req) =>
+      c.supervisor(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/backchecks',
+    ...kit.route({ controller: 'FieldworkController', handler: 'backChecks', method: 'get' }, (req) =>
+      c.backChecks(req.user as AuthUser, req.params.id, req.query.state as string),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/backchecks/sample',
+    ...kit.route({ controller: 'FieldworkController', handler: 'sample', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.sample(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/backchecks/:checkId',
+    ...kit.route({ controller: 'FieldworkController', handler: 'record', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.record(req.user as AuthUser, req.params.id, req.params.checkId, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/appeals',
+    ...kit.route({ controller: 'FieldworkController', handler: 'appeals', method: 'get' }, (req) =>
+      c.appeals(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/appeals/:appealId',
+    ...kit.route({ controller: 'FieldworkController', handler: 'decide', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.decide(req.user as AuthUser, req.params.id, req.params.appealId, req.body),
+    ),
+  );
+}
+
+/** Express routes of CapiAppealsController (mounted by src/http/app.ts). */
+export function capiAppealsControllerRoutes(r: Router, c: CapiAppealsController, kit: RouteKit) {
+  r.get(
+    '/api/capi/interviews',
+    ...kit.route({ controller: 'CapiAppealsController', handler: 'mine', method: 'get', roles: ['INTERVIEWER'] }, (req) =>
+      c.mine(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/capi/appeals',
+    ...kit.route({ controller: 'CapiAppealsController', handler: 'appeal', method: 'post', roles: ['INTERVIEWER'] }, (req) =>
+      c.appeal(req.user as AuthUser, req.body),
+    ),
+  );
 }

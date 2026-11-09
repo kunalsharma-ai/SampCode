@@ -2,15 +2,11 @@
  * Milestone 3: themes, translations (AI-assisted, human-reviewed) and device rules, through the API
  * and the respondent flow. The AI provider is a scripted fake.
  */
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { AiProvider, type TranslateRequest, type TranslateResult } from '../src/ai/ai-provider';
 
 process.env.ALLOW_SIGNUP = 'true';
@@ -34,7 +30,7 @@ class FakeTranslator extends AiProvider {
 }
 
 const fake = new FakeTranslator();
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let auth: Record<string, string>;
 let surveyId: string;
@@ -73,11 +69,7 @@ async function start(url: string, headers: Record<string, string> = {}, extra: R
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AiProvider)
-    .useValue(fake)
-    .compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp({ overrides: [[AiProvider, fake]] });
   await app.init();
   http = request(app.getHttpServer());
   const res = await http

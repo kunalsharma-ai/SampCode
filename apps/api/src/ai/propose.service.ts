@@ -1,9 +1,8 @@
-import { Injectable } from '@nestjs/common';
 import { parseSurveyDefinition } from '@zapx/survey-schema';
 import type { AuthUser } from '../auth/auth.types';
-import { SurveysService } from '../surveys/surveys.service';
-import { ChangeSetsService } from '../changesets/changesets.service';
-import { ArchitectService } from './architect.service';
+import { type SurveysService } from '../surveys/surveys.service';
+import { type ChangeSetsService } from '../changesets/changesets.service';
+import { type ArchitectService } from './architect.service';
 import type { AiDocument } from './ai-provider';
 
 /**
@@ -11,7 +10,6 @@ import type { AiDocument } from './ai-provider';
  * The result is always a change set for a person to review; the draft is not touched. Used by the
  * request endpoint and by the job worker.
  */
-@Injectable()
 export class ProposeService {
   constructor(
     private readonly architect: ArchitectService,

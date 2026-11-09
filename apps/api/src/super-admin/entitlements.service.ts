@@ -1,7 +1,6 @@
-import { Injectable } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
-import { PrismaService } from '../common/prisma.service';
-import { PlanCatalogService } from './plan-catalog.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type PlanCatalogService } from './plan-catalog.service';
 import { resolveEntitlements, type Entitlements, type Surface } from './features';
 
 /**
@@ -10,7 +9,6 @@ import { resolveEntitlements, type Entitlements, type Surface } from './features
  * (GET /api/me/entitlements/stream) are told at once about changes made in this process, and check
  * every few seconds for changes made by another process.
  */
-@Injectable()
 export class EntitlementsService {
   private readonly events = new EventEmitter();
 

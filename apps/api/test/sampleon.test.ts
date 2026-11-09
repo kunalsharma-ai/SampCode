@@ -21,17 +21,13 @@ const ports = vi.hoisted(() => {
   return { port };
 });
 
-import 'reflect-metadata';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { CallbackWorker } from '../src/integrations/callback.worker';
 
@@ -107,7 +103,7 @@ function event(type: string, payload: Record<string, unknown>, surveyId: string,
 
 // ---- App --------------------------------------------------------------------------------------
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let worker: CallbackWorker;
@@ -128,8 +124,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => mock.listen(ports.port, '127.0.0.1', r));
 
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

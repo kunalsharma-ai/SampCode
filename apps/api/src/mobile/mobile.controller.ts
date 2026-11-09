@@ -1,22 +1,18 @@
-import { Controller, Get } from '@nestjs/common';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { config } from '../config';
-import { ALL_ROLES, Public, Roles } from '../auth/decorators';
+import { ALL_ROLES } from '../auth/decorators';
 
 /**
  * Settings the SampCode mobile app (apps/mobile) needs from the server it signs in to. Feature access is
  * not here: that is GET /api/me/entitlements?surface=mobile, controlled by the super admin.
  */
-@Controller('mobile')
 export class MobileController {
   /** Public so the sign-in screen can check the address and refuse an app that is too old. */
-  @Public()
-  @Get('version')
   version() {
     return { service: 'zapx', minimumAppVersion: config().MOBILE_MIN_VERSION ?? null };
   }
 
-  @Get('config')
-  @Roles(...ALL_ROLES)
   settings() {
     const c = config();
     return {
@@ -26,4 +22,16 @@ export class MobileController {
       minimumAppVersion: c.MOBILE_MIN_VERSION ?? null,
     };
   }
+}
+
+/** Express routes of MobileController (mounted by src/http/app.ts). */
+export function mobileControllerRoutes(r: Router, c: MobileController, kit: RouteKit) {
+  r.get(
+    '/api/mobile/version',
+    ...kit.route({ controller: 'MobileController', handler: 'version', method: 'get', public: true }, () => c.version()),
+  );
+  r.get(
+    '/api/mobile/config',
+    ...kit.route({ controller: 'MobileController', handler: 'settings', method: 'get', roles: [...ALL_ROLES] }, () => c.settings()),
+  );
 }

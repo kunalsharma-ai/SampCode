@@ -2,22 +2,18 @@
  * API integration tests against a real MongoDB database (DATABASE_URL, a replica set).
  * Each run signs up fresh tenants, so tests do not interfere with other data.
  */
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { signParams } from '@zapx/redirect-core';
 
 process.env.ALLOW_SIGNUP = 'true';
 const demo = JSON.parse(readFileSync(join(__dirname, '../../../docs/examples/demo-screener.json'), 'utf8'));
 const run = Date.now().toString(36);
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 
 async function signup(label: string) {
@@ -44,8 +40,7 @@ async function answer(token: string, pageId: string, answers: Record<string, unk
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
 });

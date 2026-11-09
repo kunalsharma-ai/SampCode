@@ -1,26 +1,11 @@
-/**
- * Photos and interview recordings (Milestone 12).
- *
- * Unlike survey media, captures come from respondents and interviewers and can show people, homes
- * and voices. They are never public: only people who can see the survey open them, every view is
- * audited, an administrator can erase all of a survey's captures, and CAPTURE_RETENTION_DAYS deletes
- * them automatically. The file type is decided from the bytes, never from the browser's claim.
- */
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-  PayloadTooLargeException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, PayloadTooLargeException } from '../http/errors';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma } from '@zapx/db';
 import { allQuestions, capiSettingsOf, CAPTURE_REF, type Answers, type SurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { SurveysService } from '../surveys/surveys.service';
-import { FileStore } from '../jobs/file-store';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type SurveysService } from '../surveys/surveys.service';
+import { type FileStore } from '../jobs/file-store';
 import { sniffMedia } from '../media/media.service';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
@@ -66,7 +51,6 @@ export interface CaptureView {
   transcript?: { text: string; language: string | null; at: Date } | null;
 }
 
-@Injectable()
 export class CaptureService {
   constructor(
     private readonly prisma: PrismaService,

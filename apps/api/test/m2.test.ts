@@ -2,15 +2,11 @@
  * Milestone 2: QA Laboratory, change sets, template import and the AI Survey Architect.
  * The AI provider is replaced by a scripted fake, so these tests never call a model.
  */
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { AiProvider, type ArchitectRequest, type ArchitectResult } from '../src/ai/ai-provider';
 import { buildArchitectContent } from '../src/ai/claude.provider';
 import { importTemplateRows, parseCsv } from '../src/imports/template-import';
@@ -37,7 +33,7 @@ class FakeAiProvider extends AiProvider {
 }
 
 const fake = new FakeAiProvider();
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let auth: Record<string, string>;
 let surveyId: string;
@@ -54,11 +50,7 @@ async function newSurvey(name: string) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AiProvider)
-    .useValue(fake)
-    .compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp({ overrides: [[AiProvider, fake]] });
   await app.init();
   http = request(app.getHttpServer());
   const res = await http
@@ -289,8 +281,7 @@ describe('AI Survey Architect', () => {
 
 describe('Without an API key', () => {
   it('answers 503 for AI requests and keeps everything else working', async () => {
-    const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    const plain = configureApp(mod.createNestApplication());
+    const plain = createApp();
     await plain.init();
     try {
       const h = request(plain.getHttpServer());

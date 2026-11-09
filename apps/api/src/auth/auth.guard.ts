@@ -1,13 +1,12 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
+import { ForbiddenException, UnauthorizedException } from '../http/errors';
+import type { JwtService } from '../http/jwt';
+import type { Authenticator } from '../http/routes';
 import type { Request } from 'express';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { parseApiKey, secretMatches } from './api-keys';
 import { API_KEY_PREFIX, AUTH_COOKIE, CLIENT_HEADER, CSRF_HEADER, lowerRole, type AuthUser, type RoleName } from './auth.types';
-import { IS_PUBLIC, ROLES } from './decorators';
 import { SESSION_ALGORITHMS } from './session';
-import { PlanCatalogService } from '../super-admin/plan-catalog.service';
+import { type PlanCatalogService } from '../super-admin/plan-catalog.service';
 import { featureForRoute, resolveEntitlements, type Entitlements } from '../super-admin/features';
 
 /** lastSeenAt is written at most this often per member. */
@@ -58,27 +57,23 @@ export type RequestWithUser = Request & { user?: AuthUser; entitlements?: Entitl
 const LAST_USED_GRANULARITY_MS = 60_000;
 
 /**
- * Global guard: every endpoint requires a valid session unless marked @Public().
+ * Runs before every route (http/routes.ts): every endpoint requires a valid session unless it is public.
  * Accepts the httpOnly session cookie (studio), a Bearer session token, or a Bearer
  * organization API key (zapx_<prefix>_<secret>).
  *
  * The member is read from the database on every request, so a role or project-scope change
  * applies at once instead of when the session token expires.
  */
-@Injectable()
-export class AuthGuard implements CanActivate {
+export class AuthGuard implements Authenticator {
   constructor(
-    private readonly reflector: Reflector,
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
     private readonly plans: PlanCatalogService,
   ) {}
 
-  async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const targets = [ctx.getHandler(), ctx.getClass()];
-    if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, targets)) return true;
+  async check(req: RequestWithUser, route: { public?: boolean; roles?: RoleName[]; controller: string }): Promise<void> {
+    if (route.public) return;
 
-    const req = ctx.switchToHttp().getRequest<RequestWithUser>();
     const header = req.headers.authorization;
     const bearer = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
     const cookie = (req.cookies as Record<string, string> | undefined)?.[AUTH_COOKIE];
@@ -93,14 +88,13 @@ export class AuthGuard implements CanActivate {
     const viaKey = bearer?.startsWith(API_KEY_PREFIX);
     const { user, member } = viaKey ? await this.fromApiKey(bearer!) : await this.fromSession(token);
     req.user = { ...user, client };
-    this.gate(req, member, client, ctx.getClass().name);
+    this.gate(req, member, client, route.controller);
 
-    const roles = this.reflector.getAllAndOverride<RoleName[] | undefined>(ROLES, targets);
+    const roles = route.roles;
     // Interviewers are deny-by-default: they reach only endpoints that list them explicitly
     // (the CAPI app API), never the studio's projects, surveys, data or settings.
     if (req.user.role === 'INTERVIEWER' && !roles?.includes('INTERVIEWER')) throw new ForbiddenException('Your role cannot do this');
     if (roles && !roles.includes(req.user.role)) throw new ForbiddenException('Your role cannot do this');
-    return true;
   }
 
   /**

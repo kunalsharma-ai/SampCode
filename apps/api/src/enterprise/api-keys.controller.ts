@@ -1,11 +1,13 @@
-import { Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import { generateApiKey } from '../auth/api-keys';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -30,8 +32,6 @@ const SELECT = {
  * created it, with at most the key's role (programmer or viewer, never admin), and sees the same
  * projects that member sees. Admins see and can revoke every key; programmers manage their own.
  */
-@Controller('api-keys')
-@Roles(...CAN_EDIT)
 export class ApiKeysController {
   constructor(
     private readonly prisma: PrismaService,
@@ -42,8 +42,7 @@ export class ApiKeysController {
     if (user.apiKeyId) throw new ForbiddenException('API keys cannot manage API keys. Sign in to the studio.');
   }
 
-  @Get()
-  list(@CurrentUser() user: AuthUser) {
+  list(user: AuthUser) {
     ApiKeysController.humanOnly(user);
     return this.prisma.apiKey.findMany({
       where: { tenantId: user.tenantId, ...(user.role === 'ADMIN' ? {} : { createdById: user.id }) },
@@ -52,8 +51,7 @@ export class ApiKeysController {
     });
   }
 
-  @Post()
-  async create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async create(user: AuthUser, body: unknown) {
     ApiKeysController.humanOnly(user);
     const input = parseBody(createSchema, body);
     const { key, prefix, secretHash } = generateApiKey();
@@ -74,9 +72,7 @@ export class ApiKeysController {
     return { ...created, key };
   }
 
-  @Delete(':id')
-  @HttpCode(204)
-  async revoke(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async revoke(user: AuthUser, id: string) {
     ApiKeysController.humanOnly(user);
     const k = await this.prisma.apiKey.findFirst({
       where: { id, tenantId: user.tenantId, ...(user.role === 'ADMIN' ? {} : { createdById: user.id }) },
@@ -85,4 +81,26 @@ export class ApiKeysController {
     if (!k.revokedAt) await this.prisma.apiKey.update({ where: { id }, data: { revokedAt: new Date() } });
     await this.audit.record(user, 'api_key.revoke', 'api_key', id, { name: k.name, prefix: k.prefix });
   }
+}
+
+/** Express routes of ApiKeysController (mounted by src/http/app.ts). */
+export function apiKeysControllerRoutes(r: Router, c: ApiKeysController, kit: RouteKit) {
+  r.get(
+    '/api/api-keys',
+    ...kit.route({ controller: 'ApiKeysController', handler: 'list', method: 'get', roles: [...CAN_EDIT] }, (req) =>
+      c.list(req.user as AuthUser),
+    ),
+  );
+  r.post(
+    '/api/api-keys',
+    ...kit.route({ controller: 'ApiKeysController', handler: 'create', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.create(req.user as AuthUser, req.body),
+    ),
+  );
+  r.delete(
+    '/api/api-keys/:id',
+    ...kit.route({ controller: 'ApiKeysController', handler: 'revoke', method: 'delete', status: 204, roles: [...CAN_EDIT] }, (req) =>
+      c.revoke(req.user as AuthUser, req.params.id),
+    ),
+  );
 }
