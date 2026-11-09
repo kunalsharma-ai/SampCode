@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ThrottlerStorageService, type ThrottlerStorage } from '@nestjs/throttler';
 import { config } from '../config';
+import { mongoDate, mongoNumber } from './mongo';
 import { PrismaService } from './prisma.service';
 
 type ThrottlerStorageRecord = Awaited<ReturnType<ThrottlerStorage['increment']>>;
@@ -12,12 +13,12 @@ interface Row {
 }
 
 /**
- * Rate-limit counters in PostgreSQL (security review S4), so every API process counts against the
+ * Rate-limit counters in the database (security review S4), so every API process counts against the
  * same limit: with the default in-memory store two tasks allowed twice the configured rate, and
  * autoscaling changed the real limit. Chosen with THROTTLE_STORE (default `database` in production).
  *
  * Fixed windows: the first hit opens a window of `ttl`; hits above `limit` block the key for
- * `blockDuration`. One upsert per request. If the database cannot be reached the request is counted
+ * `blockDuration`. One atomic findAndModify per request. If the database cannot be reached the request is counted
  * in this process instead (logged), so the limiter never becomes the reason the API is down.
  */
 export class DbThrottlerStorage implements ThrottlerStorage {
@@ -29,10 +30,12 @@ export class DbThrottlerStorage implements ThrottlerStorage {
   constructor(private readonly prisma: PrismaService) {}
 
   async sweep(): Promise<number> {
+    const graceEnd = new Date(Date.now() - 60_000);
     try {
-      return await this.prisma.$executeRaw`
-        DELETE FROM "RateLimitBucket"
-        WHERE "windowEnds" < now() - interval '1 minute' AND ("blockedUntil" IS NULL OR "blockedUntil" < now() - interval '1 minute')`;
+      const { count } = await this.prisma.rateLimitBucket.deleteMany({
+        where: { windowEnds: { lt: graceEnd }, OR: [{ blockedUntil: null }, { blockedUntil: { lt: graceEnd } }] },
+      });
+      return count;
     } catch {
       return 0;
     }
@@ -46,34 +49,45 @@ export class DbThrottlerStorage implements ThrottlerStorage {
       this.sweeper.unref();
     }
     try {
-      // While blocked, hits are not counted; once a window or block has ended the count restarts.
-      const [row] = await this.prisma.$queryRaw<Row[]>`
-        INSERT INTO "RateLimitBucket" AS b ("key", "hits", "windowEnds", "blockedUntil")
-        VALUES (${id}, 1, now() + make_interval(secs => ${ttl / 1000}), NULL)
-        ON CONFLICT ("key") DO UPDATE SET
-          "hits" = CASE
-            WHEN b."blockedUntil" > now() THEN b."hits"
-            WHEN b."windowEnds" <= now() OR b."blockedUntil" IS NOT NULL THEN 1
-            ELSE b."hits" + 1 END,
-          "windowEnds" = CASE
-            WHEN b."blockedUntil" > now() THEN b."windowEnds"
-            WHEN b."windowEnds" <= now() OR b."blockedUntil" IS NOT NULL THEN now() + make_interval(secs => ${ttl / 1000})
-            ELSE b."windowEnds" END,
-          "blockedUntil" = CASE WHEN b."blockedUntil" > now() THEN b."blockedUntil" ELSE NULL END
-        RETURNING "hits",
-          extract(epoch FROM ("windowEnds" - now()))::float8 AS expires_in,
-          extract(epoch FROM ("blockedUntil" - now()))::float8 AS blocked_for`;
-      let blockedFor = row!.blocked_for;
-      if (blockedFor === null && row!.hits > limit) {
-        const [b] = await this.prisma.$queryRaw<Array<{ blocked_for: number }>>`
-          UPDATE "RateLimitBucket" SET "blockedUntil" = now() + make_interval(secs => ${blockDuration / 1000})
-          WHERE "key" = ${id}
-          RETURNING extract(epoch FROM ("blockedUntil" - now()))::float8 AS blocked_for`;
-        blockedFor = b?.blocked_for ?? blockDuration / 1000;
+      // One atomic upsert (an update pipeline evaluated on the server with $$NOW). While blocked, hits are
+      // not counted; once a window or block has ended the count restarts.
+      const blockedUntil = { $ifNull: ['$blockedUntil', null] };
+      const res = (await this.prisma.$runCommandRaw({
+        findAndModify: 'RateLimitBucket',
+        query: { _id: id },
+        upsert: true,
+        new: true,
+        update: [
+          {
+            $set: {
+              _blocked: { $gt: [blockedUntil, '$$NOW'] },
+              _reset: { $or: [{ $lte: [{ $ifNull: ['$windowEnds', null] }, '$$NOW'] }, { $ne: [blockedUntil, null] }] },
+            },
+          },
+          {
+            $set: {
+              hits: { $cond: ['$_blocked', '$hits', { $cond: ['$_reset', 1, { $add: ['$hits', 1] }] }] },
+              windowEnds: { $cond: ['$_blocked', '$windowEnds', { $cond: ['$_reset', { $add: ['$$NOW', ttl] }, '$windowEnds'] }] },
+              blockedUntil: { $cond: ['$_blocked', '$blockedUntil', null] },
+            },
+          },
+          { $unset: ['_blocked', '_reset'] },
+        ],
+      } as never)) as { value: { hits: unknown; windowEnds: unknown; blockedUntil: unknown } };
+      const now = Date.now();
+      const row = {
+        hits: mongoNumber(res.value.hits),
+        expires_in: ((mongoDate(res.value.windowEnds)?.getTime() ?? now) - now) / 1000,
+        blocked_for: res.value.blockedUntil ? ((mongoDate(res.value.blockedUntil)?.getTime() ?? now) - now) / 1000 : null,
+      } satisfies Row;
+      let blockedFor = row.blocked_for;
+      if (blockedFor === null && row.hits > limit) {
+        await this.prisma.rateLimitBucket.update({ where: { key: id }, data: { blockedUntil: new Date(now + blockDuration) } });
+        blockedFor = blockDuration / 1000;
       }
       return {
-        totalHits: row!.hits,
-        timeToExpire: Math.max(0, Math.ceil(row!.expires_in)),
+        totalHits: row.hits,
+        timeToExpire: Math.max(0, Math.ceil(row.expires_in)),
         isBlocked: blockedFor !== null && blockedFor > 0,
         timeToBlockExpire: blockedFor !== null ? Math.max(0, Math.ceil(blockedFor)) : 0,
       };

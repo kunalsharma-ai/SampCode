@@ -15,6 +15,7 @@ import { SecretBox } from '../platform/secret-box';
 import { HttpDelivery } from './http-delivery';
 import { AutomationQueue } from '../automation/automation.queue';
 import { SIGNATURE_HEADER, signWebhook } from './webhook-signing';
+import { claimQueued } from '../common/mongo';
 
 export const WEBHOOK_EVENTS = [
   'response.finished',
@@ -162,16 +163,26 @@ export class WebhookService {
   async deliverDue(): Promise<WebhookRun> {
     const run: WebhookRun = { delivered: 0, retrying: 0, failed: 0, dead: 0 };
     for (let round = 0; round < 4; round++) {
-      const due = await this.prisma.$queryRaw<WebhookDelivery[]>`
-        UPDATE "WebhookDelivery" SET "nextAttemptAt" = now() + (${LEASE_MS} * interval '1 millisecond'), "updatedAt" = now()
-        WHERE id IN (
-          SELECT id FROM "WebhookDelivery"
-          WHERE state = 'PENDING' AND "nextAttemptAt" <= now()
-          ORDER BY "nextAttemptAt" ASC
-          LIMIT ${BATCH}
-          FOR UPDATE SKIP LOCKED
-        )
-        RETURNING *`;
+      // The lease (nextAttemptAt pushed forward) keeps other workers away until it expires.
+      const now = new Date();
+      const due = await claimQueued<WebhookDelivery>({
+        limit: BATCH,
+        candidates: (take) =>
+          this.prisma.webhookDelivery.findMany({
+            where: { state: 'PENDING', nextAttemptAt: { lte: now } },
+            orderBy: { nextAttemptAt: 'asc' },
+            take,
+            select: { id: true },
+          }),
+        claim: async (id) =>
+          (
+            await this.prisma.webhookDelivery.updateMany({
+              where: { id, state: 'PENDING', nextAttemptAt: { lte: now } },
+              data: { nextAttemptAt: new Date(Date.now() + LEASE_MS) },
+            })
+          ).count === 1,
+        load: (ids) => this.prisma.webhookDelivery.findMany({ where: { id: { in: ids } } }),
+      });
       if (due.length === 0) break;
       for (const d of due) run[await this.deliver(d)]++;
     }

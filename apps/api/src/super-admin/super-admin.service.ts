@@ -367,7 +367,7 @@ export class SuperAdminService {
         ...(tenantId ? { tenantId } : {}),
         ...(q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { name: { contains: q, mode: 'insensitive' } }] } : {}),
       },
-      orderBy: [{ lastSeenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+      orderBy: [{ lastSeenAt: 'desc' }, { createdAt: 'desc' }], // MongoDB puts never-seen users last when descending
       take: 500,
       select: {
         id: true,

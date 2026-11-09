@@ -33,7 +33,7 @@ EXPOSE 4000
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD node -e "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/main.js"]
 
-# One-off job: apply database migrations, then exit (an ECS task before each deployment).
+# One-off job: create the MongoDB collections and sync indexes, then exit (an ECS task before each deployment).
 FROM api AS migrate
 HEALTHCHECK NONE
 # Accepts DATABASE_URL or the DB_* parts (apps/api/src/database-url.ts), like the API.

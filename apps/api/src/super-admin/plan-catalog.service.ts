@@ -60,6 +60,7 @@ export class PlanCatalogService implements OnModuleInit, OnModuleDestroy {
   async ensureDefaults() {
     try {
       if (await this.prisma.subscriptionPlan.count()) return;
+      // Another API process starting at the same moment may write them first: that unique error is logged below.
       await this.prisma.subscriptionPlan.createMany({
         data: PLAN_CODES.map((code, i) => ({
           code,
@@ -69,7 +70,6 @@ export class PlanCatalogService implements OnModuleInit, OnModuleDestroy {
           mobileFeatures: allFeatures('mobile'),
           sortOrder: i,
         })),
-        skipDuplicates: true,
       });
     } catch (e) {
       this.log.warn(`Could not write the built-in plans: ${(e as Error).message}`);

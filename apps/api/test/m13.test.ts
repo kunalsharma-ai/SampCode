@@ -562,18 +562,22 @@ describe('billing with Stripe', () => {
 });
 
 describe('running on AWS', () => {
-  it('builds the database URL from the RDS secret parts', () => {
-    expect(databaseUrlFromParts({ DATABASE_URL: 'postgresql://a/b' })).toBe('postgresql://a/b');
+  it('builds the MongoDB connection string from the secret parts', () => {
+    expect(databaseUrlFromParts({ DATABASE_URL: 'mongodb://a/b' })).toBe('mongodb://a/b');
     expect(databaseUrlFromParts({ DB_HOST: 'db.internal' })).toBeUndefined();
     const url = databaseUrlFromParts({
-      DB_HOST: 'zapx.abc.eu-west-1.rds.amazonaws.com',
+      DB_HOST: 'sampcode.abcde.mongodb.net',
       DB_USER: 'zapx',
       DB_PASSWORD: 'p@ss:w/rd?#%',
       DB_NAME: 'zapx',
-      DB_SSLMODE: 'require',
     })!;
-    expect(url).toBe('postgresql://zapx:p%40ss%3Aw%2Frd%3F%23%25@zapx.abc.eu-west-1.rds.amazonaws.com:5432/zapx?sslmode=require'); // secret-scan:allow (made-up test password)
+    expect(url).toBe('mongodb+srv://zapx:p%40ss%3Aw%2Frd%3F%23%25@sampcode.abcde.mongodb.net/zapx?retryWrites=true&w=majority'); // secret-scan:allow (made-up test password)
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
+    expect(
+      databaseUrlFromParts({ DB_HOST: 'mongo-0', DB_PORT: '27017', DB_USER: 'u', DB_PASSWORD: 'p', DB_OPTIONS: 'replicaSet=rs0' }),
+    ).toBe(
+      'mongodb://u:p@mongo-0:27017/zapx?replicaSet=rs0&retryWrites=true&w=majority', // secret-scan:allow (made-up test password)
+    );
   });
 
   it('reads viewer addresses as CloudFront sends them', () => {

@@ -18,6 +18,7 @@ import { AuditService } from '../common/audit.service';
 import { AccessService } from '../common/access.service';
 import { QualityService } from '../quality/quality.service';
 import type { AuthUser } from '../auth/auth.types';
+import { createSkippingDuplicates } from '../common/mongo';
 
 /** Flags that point at how the interview was conducted (shown as exceptions to supervisors). */
 export const FIELD_EXCEPTION_FLAGS = [
@@ -95,8 +96,8 @@ export class FieldworkService {
       for (const id of a.slice(0, n)) chosen.push({ id, interviewerId: interviewerId || null });
     }
     if (chosen.length)
-      await this.prisma.backCheck.createMany({
-        data: chosen.map((c) => ({
+      await createSkippingDuplicates(
+        chosen.map((c) => ({
           tenantId: user.tenantId,
           surveyId,
           responseId: c.id,
@@ -104,8 +105,12 @@ export class FieldworkService {
           method: input.method,
           sampledById: user.id,
         })),
-        skipDuplicates: true,
-      });
+        {
+          createMany: (data) => this.prisma.backCheck.createMany({ data }),
+          create: (data) => this.prisma.backCheck.create({ data }),
+          countIds: (ids) => this.prisma.backCheck.count({ where: { id: { in: ids } } }),
+        },
+      );
     await this.audit.record(user, 'backcheck.sample', 'survey', surveyId, { ...input, drawn: chosen.length, eligible: pool.length });
     return { drawn: chosen.length, eligible: pool.length };
   }

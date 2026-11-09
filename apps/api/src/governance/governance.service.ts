@@ -162,12 +162,34 @@ export class GovernanceService {
       const ids = rows.map((r) => r.id);
       await this.captures.dropWhere({ tenantId, responseIds: ids });
       await this.prisma.openEndFingerprint.deleteMany({ where: { responseId: { in: ids } } });
-      await this.prisma.$executeRaw`
-        UPDATE "Response" SET
-          "answers" = '{}', "entryParams" = '{}', "returnUrl" = NULL, "userAgent" = NULL, "ipHash" = NULL,
-          "deviceHash" = NULL, "signals" = '{}', "location" = NULL, "evidence" = NULL, "geoCountry" = NULL,
-          "uid" = 'erased-' || "id", "erasedAt" = now()
-        WHERE "id" = ANY(${ids}) AND "erasedAt" IS NULL`;
+      // One server-side update so uid can be derived from the id ('erased-' + id).
+      await this.prisma.$runCommandRaw({
+        update: 'Response',
+        updates: [
+          {
+            q: { _id: { $in: ids }, $or: [{ erasedAt: null }, { erasedAt: { $exists: false } }] },
+            u: [
+              {
+                $set: {
+                  answers: { $literal: {} },
+                  entryParams: { $literal: {} },
+                  signals: { $literal: {} },
+                  returnUrl: null,
+                  userAgent: null,
+                  ipHash: null,
+                  deviceHash: null,
+                  location: null,
+                  evidence: null,
+                  geoCountry: null,
+                  uid: { $concat: ['erased-', '$_id'] },
+                  erasedAt: '$$NOW',
+                },
+              },
+            ],
+            multi: true,
+          },
+        ],
+      } as never);
       erased += ids.length;
     }
     return erased;

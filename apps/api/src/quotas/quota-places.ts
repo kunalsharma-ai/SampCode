@@ -7,6 +7,7 @@
 import type { Prisma } from '@zapx/db';
 import { matchingQuotas, quotaSlots } from '@zapx/logic-engine';
 import type { Answers, SurveyDefinition } from '@zapx/survey-schema';
+import { mongoNumber } from '../common/mongo';
 
 export type TakeResult = { ok: true; cells: string[] } | { ok: false; quotaId: string };
 
@@ -34,9 +35,17 @@ export async function takeQuotaPlaces(
   for (const slot of slots) {
     let taken: string | null = null;
     for (const q of slot) {
-      const n = await tx.$executeRaw`UPDATE "QuotaCount" SET "count" = "count" + 1
-        WHERE "surveyId" = ${surveyId} AND "quotaId" = ${q.id} AND "count" < COALESCE("targetOverride", ${q.target})`;
-      if (n > 0) {
+      // Atomic "take a place if one is left": count < (targetOverride ?? target), checked on the server.
+      const res = (await tx.$runCommandRaw({
+        update: 'QuotaCount',
+        updates: [
+          {
+            q: { surveyId, quotaId: q.id, $expr: { $lt: ['$count', { $ifNull: ['$targetOverride', q.target] }] } },
+            u: { $inc: { count: 1 } },
+          },
+        ],
+      } as never)) as { nModified?: unknown };
+      if (mongoNumber(res.nModified) > 0) {
         taken = q.id;
         break;
       }
@@ -76,5 +85,5 @@ export async function releaseQuotaPlaces(
 ) {
   const ids = r.quotaCells.length ? r.quotaCells : matchingQuotas(def, (r.answers ?? {}) as Answers).map((q) => q.id);
   for (const id of ids)
-    await tx.$executeRaw`UPDATE "QuotaCount" SET "count" = "count" - 1 WHERE "surveyId" = ${surveyId} AND "quotaId" = ${id} AND "count" > 0`;
+    await tx.quotaCount.updateMany({ where: { surveyId, quotaId: id, count: { gt: 0 } }, data: { count: { decrement: 1 } } });
 }

@@ -202,10 +202,8 @@ describe('online fraud signals and photo answers', () => {
     expect(file.headers['cross-origin-resource-policy']).toBe('same-origin');
     expect(Buffer.compare(file.body as Buffer, JPEG)).toBe(0);
     await http.get(url).set(viewer).set('Range', 'bytes=100-199').expect(206);
-    const views = await prisma.auditEvent.count({
-      where: { action: 'capture.view', data: { path: ['captureId'], equals: item.photos[0].id } },
-    });
-    expect(views).toBe(1);
+    const views = await prisma.auditEvent.findRaw({ filter: { action: 'capture.view', 'data.captureId': item.photos[0].id } });
+    expect((views as unknown as unknown[]).length).toBe(1);
   });
 
   it('blocks the device and network of rejected fraud everywhere', async () => {

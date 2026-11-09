@@ -5,6 +5,7 @@
  */
 import { Controller, Get, Query } from '@nestjs/common';
 import type { ResponseStatus, SurveyStatus } from '@zapx/db';
+import { asMongoDate, mongoNumber } from '../common/mongo';
 import { PrismaService } from '../common/prisma.service';
 import { AccessService } from '../common/access.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -69,19 +70,20 @@ export class DashboardController {
   /** Responses per UTC day: started (startedAt) or completed (completedAt, completes only). */
   private async daily(tenantId: string, surveyIds: string[], since: Date, column: 'startedAt' | 'completedAt') {
     if (!surveyIds.length) return [];
-    const [, rows] = await this.prisma.$transaction([
-      this.prisma.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, TRUE)`,
-      column === 'startedAt'
-        ? this.prisma.$queryRaw<Array<{ d: string; n: number }>>`
-            SELECT to_char("startedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d, count(*)::int AS n FROM "Response"
-            WHERE "tenantId" = ${tenantId} AND "surveyId" = ANY(${surveyIds}) AND "isTest" = false AND "startedAt" >= ${since}
-            GROUP BY 1`
-        : this.prisma.$queryRaw<Array<{ d: string; n: number }>>`
-            SELECT to_char("completedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d, count(*)::int AS n FROM "Response"
-            WHERE "tenantId" = ${tenantId} AND "surveyId" = ANY(${surveyIds}) AND "isTest" = false AND "status" = 'COMPLETE'
-              AND "completedAt" >= ${since}
-            GROUP BY 1`,
-    ]);
+    const match: Record<string, unknown> = {
+      tenantId,
+      surveyId: { $in: surveyIds },
+      isTest: false,
+      [column]: { $gte: asMongoDate(since) },
+      ...(column === 'completedAt' ? { status: 'COMPLETE' } : {}),
+    };
+    const raw = (await this.prisma.response.aggregateRaw({
+      pipeline: [
+        { $match: match } as never,
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$' + column, timezone: 'UTC' } }, n: { $sum: 1 } } },
+      ],
+    })) as unknown as Array<{ _id: string; n: unknown }>;
+    const rows = raw.map((r) => ({ d: r._id, n: mongoNumber(r.n) }));
     return rows;
   }
 

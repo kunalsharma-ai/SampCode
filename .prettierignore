@@ -3,7 +3,6 @@ pnpm-lock.yaml
 **/.next
 **/.turbo
 **/node_modules
-packages/db/prisma/migrations
 e2e/test-results
 e2e/playwright-report
 **/.terraform

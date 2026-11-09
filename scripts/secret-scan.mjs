@@ -30,7 +30,7 @@ const RULES = [
   { name: 'SampCode SCIM token', re: /\bzapx_scim_[A-Za-z0-9_-]{32,}/ },
   {
     name: 'Database URL with a password',
-    re: /\bpostgres(?:ql)?:\/\/[^:\s/'"]+:(?!zapx@|password@|postgres@|\$\{|\$)[^@\s'"]{6,}@(?!localhost|127\.0\.0\.1|postgres[:/])/,
+    re: /\b(?:postgres(?:ql)?|mongodb(?:\+srv)?):\/\/[^:\s/'"]+:(?!zapx@|password@|postgres@|\$\{|\$)[^@\s'"]{6,}@(?!localhost|127\.0\.0\.1|postgres[:/]|mongo[:/])/,
   },
   {
     name: 'Secret assigned in a settings file',

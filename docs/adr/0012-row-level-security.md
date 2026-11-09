@@ -1,6 +1,6 @@
 # 0012: PostgreSQL row-level security on respondent data
 
-Status: Accepted (Milestone 6)
+Status: Superseded by ADR 0040 (2026-11-09): MongoDB has no row-level security; the tenant guard is `PrismaService.forTenant()`. (Was: Accepted, Milestone 6)
 
 ## Context
 

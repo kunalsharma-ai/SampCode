@@ -5,7 +5,7 @@
 #   pnpm check --no-docker      skip the Docker image build (e.g. no Docker installed)
 #   pnpm check --no-e2e         skip the browser end-to-end tests
 #
-# Needs: Node 26, pnpm 10, a PostgreSQL database reachable at DATABASE_URL (from .env), and for the
+# Needs: Node 26, pnpm 10, a MongoDB replica set reachable at DATABASE_URL (from .env), and for the
 # last step Docker. The same steps run in .github/workflows/ci.yml when GitHub Actions is available.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,9 +32,9 @@ step "Formatting";                    pnpm format:check;  passed+=("format")
 step "Lint";                          pnpm lint;          passed+=("lint")
 step "Build";                         pnpm build;         passed+=("build")
 step "Type check";                    pnpm typecheck;     passed+=("typecheck")
-step "Database migrations"
-pnpm db:migrate || { echo "Could not migrate the database at DATABASE_URL. Is PostgreSQL running? (docker compose up -d postgres)"; exit 1; }
-passed+=("migrations")
+step "Database collections and indexes"
+pnpm db:migrate || { echo "Could not prepare the database at DATABASE_URL. Is MongoDB running? (docker compose up -d mongo)"; exit 1; }
+passed+=("indexes")
 step "Unit and API tests";            pnpm test;          passed+=("tests")
 step "Mobile app (type check and unit tests)"
 ( cd apps/mobile && npm ci --no-audit --no-fund --loglevel error && npm run typecheck && npm test ); passed+=("mobile")

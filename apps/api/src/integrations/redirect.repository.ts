@@ -6,6 +6,7 @@
 import { Injectable } from '@nestjs/common';
 import type { CallbackState, OutboundCallback, Prisma, Project, Response, Tenant, Vendor } from '@zapx/db';
 import { PrismaService } from '../common/prisma.service';
+import { claimQueued, createUnlessDuplicate } from '../common/mongo';
 
 export interface VendorContext {
   vendor: Vendor;
@@ -62,16 +63,14 @@ export class RedirectRepository {
 
   /** Recorded once per response and status; rejections without a response are always recorded. */
   async recordRedirect(e: NewRedirectEvent) {
-    await this.prisma.redirectEvent.createMany({ data: [e], skipDuplicates: true });
+    await createUnlessDuplicate(() => this.prisma.redirectEvent.create({ data: e }));
   }
 
   /** Idempotent: a second outcome with the same key is ignored. Returns true when queued. */
   async enqueueCallback(c: NewCallback): Promise<boolean> {
-    const r = await this.prisma.outboundCallback.createMany({
-      data: [{ ...c, payload: (c.payload ?? undefined) as Prisma.InputJsonValue | undefined }],
-      skipDuplicates: true,
-    });
-    return r.count === 1;
+    return createUnlessDuplicate(() =>
+      this.prisma.outboundCallback.create({ data: { ...c, payload: (c.payload ?? undefined) as Prisma.InputJsonValue | undefined } }),
+    );
   }
 
   /**
@@ -79,16 +78,25 @@ export class RedirectRepository {
    * workers away; if this worker dies, the callback becomes due again when the lease expires.
    */
   claimDue(limit: number, leaseMs: number): Promise<OutboundCallback[]> {
-    return this.prisma.$queryRaw<OutboundCallback[]>`
-      UPDATE "OutboundCallback" SET "nextAttemptAt" = now() + (${leaseMs} * interval '1 millisecond'), "updatedAt" = now()
-      WHERE id IN (
-        SELECT id FROM "OutboundCallback"
-        WHERE state = 'PENDING' AND "nextAttemptAt" <= now()
-        ORDER BY "nextAttemptAt" ASC
-        LIMIT ${limit}
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *`;
+    const now = new Date();
+    return claimQueued<OutboundCallback>({
+      limit,
+      candidates: (take) =>
+        this.prisma.outboundCallback.findMany({
+          where: { state: 'PENDING', nextAttemptAt: { lte: now } },
+          orderBy: { nextAttemptAt: 'asc' },
+          take,
+          select: { id: true },
+        }),
+      claim: async (id) =>
+        (
+          await this.prisma.outboundCallback.updateMany({
+            where: { id, state: 'PENDING', nextAttemptAt: { lte: now } },
+            data: { nextAttemptAt: new Date(Date.now() + leaseMs) },
+          })
+        ).count === 1,
+      load: (ids) => this.prisma.outboundCallback.findMany({ where: { id: { in: ids } } }),
+    });
   }
 
   async saveAttempt(

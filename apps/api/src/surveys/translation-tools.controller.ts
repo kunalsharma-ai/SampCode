@@ -94,7 +94,8 @@ export class TranslationToolsController {
     const memory = buildTranslationMemory(await this.approvedEntries(user, language, draft.id));
     const matches = memoryMatches(def, pres, language, memory);
     const saved = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT 1 FROM "SurveyVersion" WHERE "id" = ${draft.id} FOR UPDATE`;
+      // No row lock on MongoDB: if another edit changes this draft first, the update below hits a write
+      // conflict and the whole transaction runs again on the newer presentation (see PrismaClient in @zapx/db).
       const fresh = await tx.surveyVersion.findUniqueOrThrow({ where: { id: draft.id } });
       const latest = parsePresentation(fresh.presentation);
       const next: Presentation = latest.ok ? latest.presentation : pres;

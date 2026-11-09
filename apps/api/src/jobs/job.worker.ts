@@ -26,6 +26,7 @@ import { JOB_TYPES } from './jobs.service';
 import { DistributionService } from '../distribution/distribution.service';
 import { AutomationService } from '../automation/automation.service';
 import { GovernanceService } from '../governance/governance.service';
+import { claimQueued } from '../common/mongo';
 
 const LEASE_MS = 5 * 60_000;
 const RETRY_DELAY_MS = 30_000;
@@ -124,18 +125,29 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
 
   private async claim(): Promise<Job | null> {
     const types = this.handledTypes();
-    const [job] = await this.prisma.$queryRaw<Job[]>`
-      UPDATE "Job" SET status = 'RUNNING', attempts = attempts + 1, "lockedUntil" = now() + (${LEASE_MS} * interval '1 millisecond'),
-        "startedAt" = COALESCE("startedAt", now()), "progressNote" = 'Started', "updatedAt" = now()
-      WHERE id = (
-        SELECT id FROM "Job"
-        WHERE ((status = 'QUEUED' AND "runAfter" <= now()) OR (status = 'RUNNING' AND "lockedUntil" < now()))
-          AND "type" = ANY(${types})
-        ORDER BY "runAfter" ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *`;
+    const now = new Date();
+    const claimable: Prisma.JobWhereInput = {
+      type: { in: types },
+      OR: [
+        { status: 'QUEUED', runAfter: { lte: now } },
+        { status: 'RUNNING', lockedUntil: { lt: now } },
+      ],
+    };
+    const [job] = await claimQueued<Job>({
+      limit: 1,
+      candidates: (take) => this.prisma.job.findMany({ where: claimable, orderBy: { runAfter: 'asc' }, take, select: { id: true } }),
+      claim: async (id) =>
+        (
+          await this.prisma.job.updateMany({
+            where: { id, ...claimable },
+            data: { status: 'RUNNING', attempts: { increment: 1 }, lockedUntil: new Date(Date.now() + LEASE_MS), progressNote: 'Started' },
+          })
+        ).count === 1,
+      load: async (ids) => {
+        await this.prisma.job.updateMany({ where: { id: { in: ids }, startedAt: null }, data: { startedAt: now } });
+        return this.prisma.job.findMany({ where: { id: { in: ids } } });
+      },
+    });
     return job ?? null;
   }
 

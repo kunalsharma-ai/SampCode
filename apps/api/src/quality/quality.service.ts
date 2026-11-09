@@ -33,6 +33,7 @@ import { RedirectService } from '../integrations/redirect.service';
 import type { AuthUser } from '../auth/auth.types';
 import { CaptureService } from '../captures/capture.service';
 import { signingKey } from '../common/signing-keys';
+import { createSkippingDuplicates } from '../common/mongo';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -115,11 +116,26 @@ export class QualityService {
       fraud.geo = { country: r.geoCountry, expected: settings.countries.length ? settings.countries : declared };
     }
     if (!r.isTest) {
-      const [m] = await db.$queryRaw<Array<{ median: number | null; n: bigint }>>`
-        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY "durationMs") AS median, count(*) AS n
-        FROM "Response"
-        WHERE "surveyId" = ${r.surveyId} AND "status" = 'COMPLETE' AND "isTest" = false AND "durationMs" IS NOT NULL AND "id" <> ${r.id}`;
-      if (m && Number(m.n) >= MIN_COMPLETES_FOR_MEDIAN && m.median !== null) medianMs = Number(m.median);
+      // Median (PostgreSQL percentile_cont(0.5)) of the other completes: the middle value, or the mean of the two middle values.
+      const others: Prisma.ResponseWhereInput = {
+        surveyId: r.surveyId,
+        status: 'COMPLETE',
+        isTest: false,
+        durationMs: { not: null },
+        id: { not: r.id },
+      };
+      const n = await db.response.count({ where: others });
+      if (n >= MIN_COMPLETES_FOR_MEDIAN) {
+        const mid = await db.response.findMany({
+          where: others,
+          orderBy: { durationMs: 'asc' },
+          skip: Math.floor((n - 1) / 2),
+          take: n % 2 ? 1 : 2,
+          select: { durationMs: true },
+        });
+        const v = mid.map((x) => x.durationMs ?? 0);
+        if (v.length) medianMs = v.reduce((a, b) => a + b, 0) / v.length;
+      }
 
       const prints = openEndFingerprints(def, answers);
       if (prints.length) {
@@ -171,10 +187,14 @@ export class QualityService {
     if (r.isTest) return;
     const prints = openEndFingerprints(def, answers);
     if (prints.length === 0) return;
-    await db.openEndFingerprint.createMany({
-      data: prints.map((p) => ({ surveyId: r.surveyId, questionId: p.questionId, hash: p.hash, responseId: r.id })),
-      skipDuplicates: true,
-    });
+    await createSkippingDuplicates(
+      prints.map((p) => ({ surveyId: r.surveyId, questionId: p.questionId, hash: p.hash, responseId: r.id })),
+      {
+        createMany: (data) => db.openEndFingerprint.createMany({ data }),
+        create: (data) => db.openEndFingerprint.create({ data }),
+        countIds: (ids) => db.openEndFingerprint.count({ where: { id: { in: ids } } }),
+      },
+    );
   }
 
   // ---- Review queue ---------------------------------------------------------------------------
@@ -377,10 +397,14 @@ export class QualityService {
       ['network', r.ipHash],
     ] as const) {
       if (!hash) continue;
-      const created = await this.prisma.fraudBlock.createMany({
-        data: [{ tenantId: user.tenantId, kind, hash, responseId: r.id, note: note ?? null, createdById: user.id }],
-        skipDuplicates: true,
-      });
+      const created = await createSkippingDuplicates(
+        [{ tenantId: user.tenantId, kind, hash, responseId: r.id, note: note ?? null, createdById: user.id }],
+        {
+          createMany: (data) => this.prisma.fraudBlock.createMany({ data }),
+          create: (data) => this.prisma.fraudBlock.create({ data }),
+          countIds: (ids) => this.prisma.fraudBlock.count({ where: { id: { in: ids } } }),
+        },
+      );
       n += created.count;
     }
     if (n) await this.audit.record(user, 'fraud.block', 'response', r.id, { uid: r.uid, entries: n });

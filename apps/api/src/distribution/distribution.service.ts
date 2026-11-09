@@ -19,6 +19,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { parseCsv } from '../imports/template-import';
 import { emailProvider, type EmailProvider } from './mailer';
 import { MAX_SMS_BODY, normalizePhone, smsProvider, type SmsProvider } from './sms';
+import { createSkippingDuplicates } from '../common/mongo';
 
 export const MAX_CONTACTS = 100_000;
 /** Code of the project source that invitation links enter through. */
@@ -156,10 +157,14 @@ export class DistributionService {
         (c.phone ? matches.find((m) => m.phone === c.phone) : undefined);
       const fresh = chunk.filter((c) => !find(c));
       if (fresh.length) {
-        const n = await this.prisma.contact.createMany({
-          data: fresh.map((c) => ({ ...c, fields: c.fields as Prisma.InputJsonValue, tenantId: user.tenantId, surveyId })),
-          skipDuplicates: true,
-        });
+        const n = await createSkippingDuplicates(
+          fresh.map((c) => ({ ...c, fields: c.fields as Prisma.InputJsonValue, tenantId: user.tenantId, surveyId })),
+          {
+            createMany: (data) => this.prisma.contact.createMany({ data }),
+            create: (data) => this.prisma.contact.create({ data }),
+            countIds: (ids) => this.prisma.contact.count({ where: { id: { in: ids } } }),
+          },
+        );
         added += n.count;
       }
       // Re-importing updates names, numbers and columns, but never resubscribes someone who opted out.
@@ -250,12 +255,30 @@ export class DistributionService {
   private async respondedByWave(ids: string[]) {
     const out = new Map<string, { started: number; completed: number }>();
     if (!ids.length) return out;
-    const rows = await this.prisma.$queryRaw<Array<{ distributionId: string; started: bigint; completed: bigint }>>`
-      SELECT i."distributionId", COUNT(r.id) AS started, COUNT(r.id) FILTER (WHERE r.status = 'COMPLETE') AS completed
-      FROM "Invitation" i JOIN "Distribution" d ON d.id = i."distributionId"
-      JOIN "Response" r ON r."surveyId" = d."surveyId" AND r.uid = i.uid
-      WHERE i."distributionId" = ANY(${ids}) GROUP BY i."distributionId"`;
-    for (const r of rows) out.set(r.distributionId, { started: Number(r.started), completed: Number(r.completed) });
+    // Invitation uid -> response of the same survey with that uid (a join done in two indexed reads).
+    const waves = await this.prisma.distribution.findMany({ where: { id: { in: ids } }, select: { id: true, surveyId: true } });
+    const surveyOf = new Map(waves.map((w) => [w.id, w.surveyId]));
+    const invitations = await this.prisma.invitation.findMany({
+      where: { distributionId: { in: ids } },
+      select: { distributionId: true, uid: true },
+    });
+    for (let i = 0; i < invitations.length; i += 5000) {
+      const chunk = invitations.slice(i, i + 5000);
+      const responses = await this.prisma.response.findMany({
+        where: { surveyId: { in: [...new Set(waves.map((w) => w.surveyId))] }, uid: { in: chunk.map((c) => c.uid) } },
+        select: { surveyId: true, uid: true, status: true },
+      });
+      const byKey = new Map<string, string[]>();
+      for (const r of responses) byKey.set(`${r.surveyId}|${r.uid}`, [...(byKey.get(`${r.surveyId}|${r.uid}`) ?? []), r.status]);
+      for (const inv of chunk) {
+        const statuses = byKey.get(`${surveyOf.get(inv.distributionId)}|${inv.uid}`);
+        if (!statuses) continue;
+        const o = out.get(inv.distributionId) ?? { started: 0, completed: 0 };
+        o.started += statuses.length;
+        o.completed += statuses.filter((s) => s === 'COMPLETE').length;
+        out.set(inv.distributionId, o);
+      }
+    }
     return out;
   }
 
@@ -342,15 +365,19 @@ export class DistributionService {
       select: { id: true },
     });
     for (let i = 0; i < contacts.length; i += 1000)
-      await this.prisma.invitation.createMany({
-        data: contacts.slice(i, i + 1000).map((c) => ({
+      await createSkippingDuplicates(
+        contacts.slice(i, i + 1000).map((c) => ({
           tenantId: d.tenantId,
           distributionId: d.id,
           contactId: c.id,
           uid: `inv-${randomBytes(15).toString('base64url')}`,
         })),
-        skipDuplicates: true,
-      });
+        {
+          createMany: (data) => this.prisma.invitation.createMany({ data }),
+          create: (data) => this.prisma.invitation.create({ data }),
+          countIds: (ids) => this.prisma.invitation.count({ where: { id: { in: ids } } }),
+        },
+      );
   }
 
   /** One pass of the sender: start due waves, send queued invitations, send due reminders. */
