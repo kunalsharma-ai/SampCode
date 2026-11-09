@@ -32,7 +32,9 @@ function info(model: string): ModelInfo | undefined {
     models = new Map();
     for (const m of Prisma.dmmf.datamodel.models) {
       const relations = new Map<string, { model: string; fks: string[]; refs: string[] }>();
-      for (const f of m.fields) if (f.kind === 'object') relations.set(f.name, { model: f.type, fks: [...(f.relationFromFields ?? [])], refs: [...(f.relationToFields ?? [])] });
+      for (const f of m.fields)
+        if (f.kind === 'object')
+          relations.set(f.name, { model: f.type, fks: [...(f.relationFromFields ?? [])], refs: [...(f.relationToFields ?? [])] });
       models.set(m.name, {
         optional: m.fields
           .filter((f) => (f.kind === 'scalar' || f.kind === 'enum') && !f.isRequired && !f.isList && !f.hasDefaultValue && !f.isId)
