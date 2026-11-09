@@ -98,25 +98,38 @@ variable "app_secret_keys" {
   default     = ["JWT_SECRET", "SECRETS_KEY", "SIGNING_KEYS_SECRET", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "IPINFO_TOKEN", "DEEPGRAM_API_KEY", "TWILIO_AUTH_TOKEN", "SENDGRID_API_KEY"]
 }
 
-# ---- Database ----------------------------------------------------------------------------------
-variable "db_instance_class" {
-  type    = string
-  default = "db.t4g.medium"
+# ---- Database (MongoDB Atlas, database.tf) ---------------------------------------------------------
+variable "atlas_org_id" {
+  description = "MongoDB Atlas organization id (Organization Settings in Atlas). Terraform creates one Atlas project per environment in it."
+  type        = string
 }
 
-variable "db_allocated_storage" {
-  type    = number
-  default = 50
+variable "db_instance_size" {
+  description = "Atlas cluster tier: M10 or larger (PrivateLink and point-in-time restore need a dedicated tier). M20 is about the old db.t4g.medium."
+  type        = string
+  default     = "M20"
+  validation {
+    condition     = can(regex("^M[1-9][0-9]*$", var.db_instance_size))
+    error_message = "Use a dedicated Atlas tier such as M10, M20 or M30."
+  }
 }
 
-variable "db_multi_az" {
-  type    = bool
-  default = true
+variable "db_disk_size_gb" {
+  description = "Starting disk per member; Atlas grows it automatically."
+  type        = number
+  default     = 50
+}
+
+variable "db_mongodb_version" {
+  description = "MongoDB major version (7.0 or newer)."
+  type        = string
+  default     = "8.0"
 }
 
 variable "db_backup_retention_days" {
-  type    = number
-  default = 14
+  description = "Days of daily Atlas snapshots; point-in-time restore covers the last min(this, 7) days."
+  type        = number
+  default     = 14
 }
 
 variable "log_retention_days" {
@@ -195,7 +208,7 @@ variable "autoscaling_cpu_target" {
 }
 
 variable "backup_enabled" {
-  description = "AWS Backup of the database and the files bucket, in addition to the RDS automated backups."
+  description = "AWS Backup of the files bucket (the database is backed up by Atlas, database.tf)."
   type        = bool
   default     = true
 }
