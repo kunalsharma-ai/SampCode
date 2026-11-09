@@ -20,21 +20,23 @@ jobs:
   test:
     # Set the repository variable CI_RUNNER to "self-hosted" to run on your own machine, which costs
     # no Actions minutes (it needs Docker for the MongoDB container). Default: GitHub's runner.
-    # ubuntu-24.04, not ubuntu-latest: mongo:8.0 refuses to start on Linux 6.19+ (SERVER-121912),
-    # and ubuntu-latest (26.04) runs a 6.19 kernel. Move back once the mongo image has the fix.
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       # MongoDB as a one-member replica set (Prisma needs one for transactions). A service container
       # cannot be given --replSet, so it is started here.
+      # GLIBC_TUNABLES: mongod 8.0 refuses to start on the runners' Linux 6.19+/7.x kernels
+      # (SERVER-121912) unless glibc owns rseq. The cost is tcmalloc per-thread instead of per-CPU
+      # caches, which does not matter for tests. Drop it once a mongo:8.0 tag starts there unaided.
       - name: Start MongoDB
         run: |
-          docker run -d --name mongo -p 27017:27017 mongo:8.0 --replSet rs0 --bind_ip_all
+          trap 'docker ps -a; docker logs mongo 2>&1 | tail -60' ERR
+          docker run -d --name mongo -p 27017:27017 -e GLIBC_TUNABLES=glibc.pthread.rseq=1 mongo:8.0 --replSet rs0 --bind_ip_all
           for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' && break; sleep 2; done
           docker exec mongo mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
           for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true && exit 0; sleep 2; done
-          docker ps -a; docker logs mongo 2>&1 | tail -60; exit 1
+          false
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -58,9 +60,7 @@ jobs:
 
   # Known vulnerabilities in dependencies fail the build at high severity.
   audit:
-    # ubuntu-24.04, not ubuntu-latest: mongo:8.0 refuses to start on Linux 6.19+ (SERVER-121912),
-    # and ubuntu-latest (26.04) runs a 6.19 kernel. Move back once the mongo image has the fix.
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -73,9 +73,7 @@ jobs:
   # Builds the production images and boots the whole stack with docker compose.
   docker:
     if: github.event_name != 'pull_request'
-    # ubuntu-24.04, not ubuntu-latest: mongo:8.0 refuses to start on Linux 6.19+ (SERVER-121912),
-    # and ubuntu-latest (26.04) runs a 6.19 kernel. Move back once the mongo image has the fix.
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
