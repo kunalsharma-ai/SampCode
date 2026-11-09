@@ -24,7 +24,7 @@
     "cookie-parser": "1.4.7",
     "exceljs": "4.4.0",
     "express": "5.2.1",
-    "jose": "5.9.6",
+    "jose": "6.2.15",
     "jsonwebtoken": "9.0.2",
     "mammoth": "1.13.0",
     "multer": "2.5.0",
