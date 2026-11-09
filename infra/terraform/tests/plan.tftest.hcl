@@ -10,14 +10,6 @@ mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
-  mock_resource "aws_db_instance" {
-    defaults = {
-      address            = "zapx-staging.abc.eu-west-1.rds.amazonaws.com"
-      port               = 5432
-      arn                = "arn:aws:rds:eu-west-1:111122223333:db:zapx-staging"
-      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:eu-west-1:111122223333:secret:rds-abc", kms_key_id = "k", secret_status = "active" }]
-    }
-  }
   mock_resource "aws_kms_key" {
     defaults = { arn = "arn:aws:kms:eu-west-1:111122223333:key/abc" }
   }
@@ -56,6 +48,22 @@ mock_provider "aws" {
   }
 }
 
+mock_provider "random" {}
+
+mock_provider "mongodbatlas" {
+  mock_resource "mongodbatlas_project" {
+    defaults = { id = "6500000000000000000000aa" }
+  }
+  mock_resource "mongodbatlas_privatelink_endpoint" {
+    defaults = { private_link_id = "6500000000000000000000bb", endpoint_service_name = "com.amazonaws.vpce.eu-west-1.vpce-svc-0abc" }
+  }
+  mock_data "mongodbatlas_advanced_cluster" {
+    defaults = {
+      connection_strings = [{ private_endpoint = [{ srv_connection_string = "mongodb+srv://zapx-staging-pl-0.abcde.mongodb.net" }] }]
+    }
+  }
+}
+
 mock_provider "aws" {
   alias = "us_east_1"
   mock_resource "aws_wafv2_web_acl" {
@@ -76,6 +84,7 @@ variables {
   cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111122223333:certificate/b"
   image_tag                  = "abc123"
   edge_shared_secret         = "0123456789abcdef0123456789abcdef"
+  atlas_org_id               = "6500000000000000000000cc"
 }
 
 run "plan" {
@@ -86,8 +95,12 @@ run "plan" {
     error_message = "Two private subnets and one shared NAT gateway by default"
   }
   assert {
-    condition     = aws_db_instance.main.storage_encrypted && aws_db_instance.main.deletion_protection && aws_db_instance.main.manage_master_user_password
-    error_message = "The database must be encrypted, protected from deletion and use a managed password"
+    condition     = mongodbatlas_advanced_cluster.main.termination_protection_enabled && mongodbatlas_advanced_cluster.main.pit_enabled && mongodbatlas_advanced_cluster.main.cluster_type == "REPLICASET"
+    error_message = "The database must be a replica set, protected from deletion, with point-in-time restore"
+  }
+  assert {
+    condition     = jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment[index(jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment[*].name, "DB_HOST")].value == "zapx-staging-pl-0.abcde.mongodb.net"
+    error_message = "The tasks reach the cluster through its PrivateLink host"
   }
   assert {
     condition     = aws_s3_bucket_public_access_block.files.block_public_policy && aws_s3_bucket_public_access_block.files.restrict_public_buckets
@@ -99,7 +112,7 @@ run "plan" {
   }
   assert {
     condition     = contains(jsondecode(aws_ecs_task_definition.api.container_definitions)[0].secrets[*].name, "DB_PASSWORD")
-    error_message = "The database password must come from the RDS secret"
+    error_message = "The database password must come from the database secret"
   }
   assert {
     condition     = !contains(jsondecode(aws_ecs_task_definition.api.container_definitions)[0].environment[*].name, "JWT_SECRET")
@@ -122,8 +135,8 @@ run "plan" {
     error_message = "The API scales between 2 and 6 tasks"
   }
   assert {
-    condition     = length(aws_backup_selection.main) == 1 && length(aws_backup_selection.main[0].resources) == 2
-    error_message = "AWS Backup covers the database and the files bucket"
+    condition     = length(aws_backup_selection.main) == 1 && length(aws_backup_selection.main[0].resources) == 1 && mongodbatlas_cloud_backup_schedule.main.policy_item_daily[0].retention_value == 14
+    error_message = "AWS Backup covers the files bucket; Atlas keeps 14 days of database snapshots"
   }
   assert {
     condition     = !aws_ecs_service.api.enable_execute_command

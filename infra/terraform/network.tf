@@ -138,14 +138,15 @@ resource "aws_vpc_security_group_egress_rule" "tasks_out" {
 
 resource "aws_security_group" "db" {
   name        = "${local.name}-db"
-  description = "PostgreSQL from the tasks only"
+  description = "MongoDB Atlas PrivateLink endpoint, from the tasks only"
   vpc_id      = aws_vpc.main.id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "db_from_tasks" {
   security_group_id            = aws_security_group.db.id
   referenced_security_group_id = aws_security_group.tasks.id
-  from_port                    = 5432
-  to_port                      = 5432
-  ip_protocol                  = "tcp"
+  # Atlas PrivateLink gives each cluster member its own port in this range.
+  from_port   = 1024
+  to_port     = 65535
+  ip_protocol = "tcp"
 }
