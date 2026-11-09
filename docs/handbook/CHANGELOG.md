@@ -7,6 +7,15 @@ for most, a module guide in [docs/modules/](../modules/).
 The format follows [Keep a Changelog](https://keepachangelog.com/): newest first, grouped by
 release. SampCode (called ZAPX until 2026-11-06) has no version numbers or git tags yet, so entries are grouped by milestone or PR.
 
+## MongoDB in place of PostgreSQL (2026-11-09, open PR)
+
+- SampCode now runs on MongoDB (7 or later, as a replica set) through Prisma 6, like SampAudience
+  (ADR 0040). The API, links and integrations are unchanged. The SQL migrations are replaced by
+  `pnpm db:migrate` creating collections and indexes from the schema; row-level security by the
+  tenant-scoped client `forTenant`; row locks and `SKIP LOCKED` claims by guarded updates and
+  transactions that run again on a write conflict. `docker compose up mongo` starts a one-member
+  replica set; backups use `mongodump`. `infra/terraform` still describes RDS PostgreSQL.
+
 ## SampBidx and SampAudience names (2026-11-08)
 
 - Bidzo is now called SampBidx and SAMPLEON is now called SampAudience in the docs, handbook and handoff

@@ -1,19 +1,20 @@
 # Database
 
-SampCode stores everything in one **PostgreSQL 16** database, accessed only through **Prisma 6**
-(`packages/db`). This file lists every table (Prisma "model"), field, relationship and index on `main`
-(commit `68f4531`), generated from `packages/db/prisma/schema.prisma` and checked against the
-migrations. SampCode does not use MongoDB.
+SampCode stores everything in one **MongoDB** database (7 or later, as a replica set), accessed only
+through **Prisma 6** (`packages/db`). It moved from PostgreSQL 16 in November 2026
+([ADR 0040](../adr/0040-mongodb.md)). This file lists every collection (Prisma "model"), field,
+relationship and index, generated from `packages/db/prisma/schema.prisma`. "Table" and "row" below
+mean collection and document.
 
 ## 1. The essentials
 
 | Question                | Answer                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Database name           | `zapx` locally and in Docker (`.env.example`, `docker-compose.yml`); on AWS `DB_NAME` (default `zapx`, `apps/api/src/database-url.ts`)                                                                                                                                                                                                                                                        |
-| Connection setting      | `DATABASE_URL=postgresql://user:password@host:5432/zapx?connection_limit=10&pool_timeout=20`, or `DB_HOST` + `DB_USER` + `DB_PASSWORD` (+ `DB_PORT`, `DB_NAME`, `DB_SSLMODE`, `DB_CONNECTION_LIMIT`)                                                                                                                                                                                          |
+| Connection setting      | `DATABASE_URL=mongodb://user:password@host:27017/zapx?replicaSet=rs0&maxPoolSize=10`, or `DB_HOST` + `DB_USER` + `DB_PASSWORD` (+ `DB_PORT`, `DB_NAME`, `DB_TLS`/`DB_SSLMODE`, `DB_REPLICA_SET`, `DB_AUTH_SOURCE`, `DB_CONNECTION_LIMIT`)                                                                                                                                                     |
 | Schema file             | `packages/db/prisma/schema.prisma` (56 models on `main`, 22 enums)                                                                                                                                                                                                                                                                                                                            |
-| Migrations              | `packages/db/prisma/migrations/` â€” 30 folders (the last two, `20261118000000_integrations_in_crm` from PR #38 and `20261119000000_super_admin` from PR #41), one per milestone/phase, applied in name order                                                                                                                                                                                   |
-| Client used by the code | `PrismaService` (`apps/api/src/common/prisma.service.ts`), which extends the generated `PrismaClient` from `@zapx/db`                                                                                                                                                                                                                                                                         |
+| Collections and indexes | `packages/db/src/indexes.ts` creates them from the schema (`pnpm db:migrate`); the former SQL migrations were removed                                                                                                                                                                                                                                                                         |
+| Client used by the code | `PrismaService` (`apps/api/src/common/prisma.service.ts`), which extends `PrismaClient` from `@zapx/db` (the generated client plus the NULL rules in `packages/db/src/compat.ts`)                                                                                                                                                                                                             |
 | Seed                    | `packages/db/src/seed.ts`: one organization "Demo tenant" (marked as the platform operator) and an admin account whose email and password are set by `SEED_EMAIL` and `SEED_PASSWORD`; from PR #41 also a super admin in the same organization (`SEED_SUPER_EMAIL`, `SEED_SUPER_PASSWORD`) (the development defaults are in `seed.ts`; never use them outside your laptop). Development only. |
 | Ids                     | `cuid()` strings, except `Response.id` (UUID set by the code), `MediaAsset.id` and `Capture.id` (22-character random ids, because they appear in URLs), `CatiDial.id` (random)                                                                                                                                                                                                                |
 
@@ -94,12 +95,11 @@ erDiagram
 Tables added after milestone 20 (all now on `main`): `LibraryItem` (#30), `GlossaryTerm`,
 `BlockExposure`, `QaTestCase` (#31), `BackCheck`, `QualityAppeal`, `Contact`, `Distribution`,
 `Invitation` (#32), `AutomationRule`, `AutomationRun`, `Notification` (#34), `PlatformIntegration` (#38), `SubscriptionPlan`, `PlatformAutomation`, `PlatformAutomationRun` (#41), `RateLimitBucket` (#45). PR #41 also adds super admin columns to `Tenant` (subscription, suspension, feature overrides) and `User` (`superAdmin`, `featureOverrides`, `mobileAccess`, `lastSeenAt`, `lastClient`). Columns added by PR #27
-(`User.preferences`, `Tenant.appearanceDefaults`) and later phases are in migrations
-`20261110000000_quantum_appearance` onwards.
+(`User.preferences`, `Tenant.appearanceDefaults`) and later phases are in the schema.
 
 ## 4. Logical links (no database foreign key)
 
-The code relies on these columns pointing at the right row, but PostgreSQL does not check them. A
+The code relies on these columns pointing at the right row, but the database does not check them. A
 bad value will not raise an error; it will just make the row invisible to queries that join on it.
 
 | Column(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Points at          |
@@ -129,18 +129,17 @@ code, the free limits with **no features**), `PlatformAutomationRun.tenantId` â†
   `OutboundCallback.idempotencyKey` (one callback per outcome), `CatiCase (surveyId, code)`,
   `Contact (surveyId, email)` and `(surveyId, phone)`, `Invitation.uid`, `DoNotCall (tenantId, phoneHash)`,
   `FraudBlock (tenantId, kind, hash)`, `GlossaryTerm (tenantId, language, source)`, `ApiKey.prefix`.
-  Note: in PostgreSQL a unique index treats `NULL` values as different, so `Response (surveyId, vendorId, uid)`
-  does not stop two test interviews with no vendor and the same uid; the code checks that case itself.
+  Unique indexes with an optional field are partial (they only cover documents where the field is
+  set), so, as on PostgreSQL, `Response (surveyId, vendorId, uid)` does not stop two test interviews
+  with no vendor and the same uid; the code checks that case itself.
 - **Indexes** are listed under each table below (`@@index`). They follow the queries the code runs:
   by tenant and survey, by state and next-attempt time for outboxes, by time for logs.
-- **Row-level security** (raw SQL in migrations `20261102120000_m6_enterprise` and
-  `20261103000000_m12_fraud_capture`): `Response` and `Capture` have `FORCE ROW LEVEL SECURITY` with
-  policy `zapx_tenant_isolation`. When the setting `app.tenant_id` is set (by
-  `PrismaService.forTenant`), only that organization's rows are visible; when it is not set, all rows
-  are visible (used by system paths such as the respondent flow and workers). PostgreSQL ignores the
-  policy for superusers and `BYPASSRLS` roles; the local Docker user `zapx` is a superuser, so locally
-  it is not enforced. Check with `GET /api/audit/security` (admins). Details:
-  [ADR 0012](../adr/0012-row-level-security.md), [operations/database.md](../operations/database.md).
+- **Tenant isolation of respondent data** (was PostgreSQL row-level security, ADR 0012):
+  `PrismaService.forTenant(tenantId)` adds `tenantId` to every filter on `Response`, `Capture`,
+  `SampleonAudienceRequest`, `CatiCase`, `CatiCall`, `DoNotCall`, `Contact`, `Invitation`,
+  `BackCheck` and `QualityAppeal`, and refuses writes for another tenant. System paths (the respondent
+  flow, workers) use the plain client. `GET /api/audit/security` (admins) reports `enforced`. Details:
+  [ADR 0040](../adr/0040-mongodb.md), [operations/database.md](../operations/database.md).
 - **Soft delete**: `Project`, `Survey`, `Vendor` (and `StoredFile`, `MediaAsset`, `Capture`) have
   `deletedAt`. Queries filter `deletedAt: null` (centrally in `AccessService`). Rows are never removed.
 - **Erasure, not deletion** _(PR #34)_: the retention policy clears answers and identifiers on
@@ -148,43 +147,42 @@ code, the free limits with **no features**), `PlatformAutomationRun.tenantId` â†
 
 ## 6. How the code reads and writes (CRUD)
 
-All database access is through Prisma; there is no hand-written SQL except a few `$queryRaw` /
-`$executeRaw` calls (row-level security setting, the RLS self-check, `FOR UPDATE SKIP LOCKED` claims of
-jobs, callbacks and automation runs). Patterns worth knowing:
+All database access is through Prisma. A few reports use aggregation pipelines (`aggregateRaw`:
+dashboard daily counts, responses per invitation wave, numbers on the do-not-call list) and the
+shared rate-limit store one `findAndModify` (`$runCommandRaw`). Claims of jobs, callbacks, webhooks,
+automation runs and CATI cases use `claim()` in `apps/api/src/common/mongo-compat.ts`. Patterns worth
+knowing:
 
 | Pattern               | Where                                                                                                                                      | Why                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
 | Scoped lookups        | `AccessService.projects/surveys/vendors(user)` added to every `findFirst/findMany`                                                         | tenant isolation and project access                   |
 | Optimistic locking    | `SurveysService.saveDraft` compares `expectedUpdatedAt`; `ChangeSetsService` compares `baseUpdatedAt`                                      | two people editing the same draft                     |
 | Conditional updates   | `response.updateMany({ where: { id, status: 'IN_PROGRESS', currentPage } })` in `InterviewService`                                         | double submits and races cannot advance twice         |
-| Transactions          | `prisma.$transaction(...)` in publish, complete (quota places), project delete, register                                                   | all-or-nothing changes                                |
+| Transactions          | `prisma.$transaction(...)` in publish, complete (quota places), project delete, register; run again on a write conflict                    | all-or-nothing changes                                |
 | Atomic quota counting | `takeQuotaPlaces` in `apps/api/src/quotas/quota-places.ts`                                                                                 | quotas never overfill                                 |
 | Outbox rows           | `OutboundCallback`, `WebhookDelivery`, `Job`, `AutomationRun`, `Invitation`                                                                | work is recorded in the same database, then delivered |
-| Tenant-scoped client  | `prisma.forTenant(tenantId)` for studio reads of responses, exports, review, fieldwork, analysis                                           | second line of defence (RLS)                          |
+| Tenant-scoped client  | `prisma.forTenant(tenantId)` for studio reads of responses, exports, review, fieldwork, analysis                                           | second line of defence                                |
 | Encrypted columns     | `TenantSso.clientSecretSealed`, `Vendor.partnerSecretEnc`, `Webhook.secretEnc`, `CatiCase.phoneSealed`, `User.phoneSealed` via `SecretBox` | secrets SampCode must read back                       |
 | Hashed columns        | `ApiKey.secretHash`, `TenantScim.secretHash`, `Response.sessionTokenHash`, `ipHash`, `deviceHash`, `DoNotCall.phoneHash`                   | never store the original                              |
 
-## 7. Migrations
+## 7. Collections and indexes
 
 ```bash
-# create a new migration after editing schema.prisma (development database only)
-pnpm --filter @zapx/db migrate:dev --name add_my_field
-# apply all pending migrations (local, CI, every release)
-pnpm db:migrate                      # = prisma migrate deploy with ../../.env
-node apps/api/dist/cli/migrate.js    # same, inside the Docker image / ECS migration task
-# regenerate the Prisma client after a schema change
+# after editing schema.prisma: regenerate the client, then create any new collections and indexes
 pnpm --filter @zapx/db build
+pnpm db:migrate                      # = node packages/db/dist/indexes.js with ../../.env
+node apps/api/dist/cli/migrate.js    # same, inside the Docker image / ECS migration task
 ```
 
-Rules from [operations/database.md](../operations/database.md): never edit a migration that has been
-applied anywhere; make changes additive; remove a column in two releases (stop using it, then drop it).
+Rules from [operations/database.md](../operations/database.md): make changes additive; remove a
+field in two releases (stop using it, then clean up the documents).
 
 ## 8. Backup and restoration
 
-| Environment           | Backup                                                                                                                                                     | Restore                                                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Local / single server | `DATABASE_URL=postgresql://... infra/scripts/backup.sh ./backups` (pg_dump custom format, keeps the newest 14, `KEEP=` to change)                          | `DATABASE_URL=postgresql://.../empty_db infra/scripts/restore.sh backups/zapx-<time>.dump` into an **empty** database |
-| AWS (Terraform)       | RDS automated backups with point-in-time recovery (14 days) and AWS Backup daily plan for RDS and the files bucket (35 days) â€” `infra/terraform/backup.tf` | restore to a **new** instance or bucket, verify, then point a stack at it                                             |
+| Environment           | Backup                                                                                                                                     | Restore                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Local / single server | `DATABASE_URL=mongodb://... infra/scripts/backup.sh ./backups` (mongodump gzip archive, keeps the newest 14, `KEEP=` to change)            | `DATABASE_URL=mongodb://.../empty_db infra/scripts/restore.sh backups/zapx-<time>.archive.gz` into an **empty** database |
+| AWS (Terraform)       | `infra/terraform` still describes RDS PostgreSQL and has not moved to MongoDB yet (ADR 0040); use the managed MongoDB's continuous backups | restore to a **new** cluster or bucket, verify, then point a stack at it                                                 |
 
 Files (exports, media, photos, recordings) are **not** in the database: back up `FILES_DIR` (local)
 or rely on the S3 bucket's versioning and AWS Backup. Test a restore regularly (quarterly is the

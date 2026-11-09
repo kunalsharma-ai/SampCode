@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -122,7 +122,7 @@ enum CallbackState {
 }
 
 model Tenant {
-  id                      String          @id @default(cuid())
+  id                      String          @id @default(cuid()) @map("_id")
   name                    String
   /// Organization-level redirect defaults: {urls, words, countries} (lowest precedence).
   redirectDefaults        Json            @default("{}")
@@ -169,7 +169,7 @@ model Tenant {
 
 /// Single sign-on for one organization: OpenID Connect (Milestone 8) or SAML 2.0 (Milestone 13).
 model TenantSso {
-  tenantId           String   @id
+  tenantId           String   @id @map("_id")
   tenant             Tenant   @relation(fields: [tenantId], references: [id])
   enabled            Boolean  @default(false)
   /// OIDC or SAML. The OIDC fields are empty for SAML and the SAML fields null for OIDC.
@@ -196,7 +196,7 @@ model TenantSso {
 
 /// A SAML sign-in in progress (Milestone 13): the AuthnRequest ID, used once to check InResponseTo.
 model SsoRequest {
-  id        String   @id
+  id        String   @id @map("_id")
   tenantId  String
   next      String   @default("/")
   expiresAt DateTime
@@ -207,7 +207,7 @@ model SsoRequest {
 
 /// Stripe webhook events already applied (Milestone 13), so a redelivered event changes nothing.
 model BillingEvent {
-  id        String   @id
+  id        String   @id @map("_id")
   type      String
   tenantId  String?
   createdAt DateTime @default(now())
@@ -217,7 +217,7 @@ model BillingEvent {
 
 /// SCIM 2.0 provisioning token for one organization (Milestone 8). Stored hashed like API keys.
 model TenantScim {
-  tenantId    String    @id
+  tenantId    String    @id @map("_id")
   tenant      Tenant    @relation(fields: [tenantId], references: [id])
   prefix      String    @unique
   secretHash  String
@@ -227,7 +227,7 @@ model TenantScim {
 }
 
 model User {
-  id                String           @id @default(cuid())
+  id                String           @id @default(cuid()) @map("_id")
   tenantId          String
   tenant            Tenant           @relation(fields: [tenantId], references: [id])
   email             String           @unique
@@ -271,7 +271,7 @@ model User {
 }
 
 model Project {
-  id               String          @id @default(cuid())
+  id               String          @id @default(cuid()) @map("_id")
   tenantId         String
   tenant           Tenant          @relation(fields: [tenantId], references: [id])
   name             String
@@ -290,6 +290,7 @@ model Project {
 
 /// A member with ASSIGNED project scope can see and work on this project (Milestone 6).
 model ProjectMember {
+  id String @id @default(cuid()) @map("_id")
   projectId String
   project   Project  @relation(fields: [projectId], references: [id])
   userId    String
@@ -298,12 +299,12 @@ model ProjectMember {
   addedById String?
   createdAt DateTime @default(now())
 
-  @@id([projectId, userId])
+  @@unique([projectId, userId])
   @@index([userId])
 }
 
 model Survey {
-  id              String           @id @default(cuid())
+  id              String           @id @default(cuid()) @map("_id")
   tenantId        String
   projectId       String
   project         Project          @relation(fields: [projectId], references: [id])
@@ -329,7 +330,7 @@ model Survey {
 }
 
 model SurveyVersion {
-  id           String        @id @default(cuid())
+  id           String        @id @default(cuid()) @map("_id")
   surveyId     String
   survey       Survey        @relation(fields: [surveyId], references: [id])
   version      Int
@@ -351,7 +352,7 @@ model SurveyVersion {
 }
 
 model Vendor {
-  id                  String             @id @default(cuid())
+  id                  String             @id @default(cuid()) @map("_id")
   tenantId            String
   projectId           String
   project             Project            @relation(fields: [projectId], references: [id])
@@ -399,7 +400,7 @@ model Vendor {
 }
 
 model Response {
-  id               String         @id @default(cuid())
+  id               String         @id @default(cuid()) @map("_id")
   tenantId         String
   surveyId         String
   survey           Survey         @relation(fields: [surveyId], references: [id])
@@ -495,7 +496,7 @@ model Response {
 }
 
 model QuotaCount {
-  id             String @id @default(cuid())
+  id             String @id @default(cuid()) @map("_id")
   surveyId       String
   survey         Survey @relation(fields: [surveyId], references: [id])
   quotaId        String
@@ -510,7 +511,7 @@ model QuotaCount {
 /// wins over the environment; a field left empty falls back to the environment variable.
 model PlatformIntegration {
   /// anthropic, ipinfo, deepgram, twilio, stripe or s3
-  key           String   @id
+  key           String   @id @map("_id")
   enabled       Boolean  @default(false)
   /// Non-secret fields, e.g. {"model": "...", "callerId": "+44..."}.
   settings      Json     @default("{}")
@@ -521,7 +522,7 @@ model PlatformIntegration {
 }
 
 model AuditEvent {
-  id         String   @id @default(cuid())
+  id         String   @id @default(cuid()) @map("_id")
   tenantId   String
   actorId    String?
   action     String
@@ -538,7 +539,7 @@ model AuditEvent {
 
 /// A QA Laboratory run: synthetic respondents simulated against one survey version.
 model QaRun {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   surveyId    String
   survey      Survey   @relation(fields: [surveyId], references: [id])
@@ -560,7 +561,7 @@ model QaRun {
 /// A proposed edit to a survey draft (from AI, a file import or a manual paste). Nothing reaches
 /// the draft until a programmer reviews and applies it.
 model ChangeSet {
-  id                 String       @id @default(cuid())
+  id                 String       @id @default(cuid()) @map("_id")
   tenantId           String
   surveyId           String
   survey             Survey       @relation(fields: [surveyId], references: [id])
@@ -595,7 +596,7 @@ model ChangeSet {
 
 /// Redirect audit log: every outcome redirect SampCode resolved, with the level that supplied it.
 model RedirectEvent {
-  id         String   @id @default(cuid())
+  id         String   @id @default(cuid()) @map("_id")
   tenantId   String
   surveyId   String
   /// Null when the respondent was rejected before a response was recorded.
@@ -623,7 +624,7 @@ model RedirectEvent {
 /// Outbox of server-to-server callbacks. Written when an outcome is recorded and delivered by
 /// the callback worker with retries; the idempotency key makes every outcome send at most one.
 model OutboundCallback {
-  id             String            @id @default(cuid())
+  id             String            @id @default(cuid()) @map("_id")
   tenantId       String
   vendorId       String
   vendor         Vendor            @relation(fields: [vendorId], references: [id])
@@ -653,7 +654,7 @@ model OutboundCallback {
 
 /// Tenant-specific AI permissions and limits (absent row = server defaults).
 model TenantAiPolicy {
-  tenantId              String   @id
+  tenantId              String   @id @map("_id")
   tenant                Tenant   @relation(fields: [tenantId], references: [id])
   enabled               Boolean  @default(true)
   /// AI tasks this tenant may use, e.g. ["architect","translate"].
@@ -670,7 +671,7 @@ model TenantAiPolicy {
 
 /// One AI call: who, what task, which provider and model, tokens, cost and outcome.
 model AiUsage {
-  id               String   @id @default(cuid())
+  id               String   @id @default(cuid()) @map("_id")
   tenantId         String
   userId           String?
   task             String
@@ -697,7 +698,7 @@ model AiUsage {
 
 /// Fingerprint of a long open answer (normalized text, SHA-256), to spot the same text from different respondents.
 model OpenEndFingerprint {
-  id         String   @id @default(cuid())
+  id         String   @id @default(cuid()) @map("_id")
   surveyId   String
   questionId String
   hash       String
@@ -710,7 +711,7 @@ model OpenEndFingerprint {
 
 /// A survey an interviewer may conduct in the CAPI app.
 model CapiAssignment {
-  id            String   @id @default(cuid())
+  id            String   @id @default(cuid()) @map("_id")
   tenantId      String
   surveyId      String
   survey        Survey   @relation(fields: [surveyId], references: [id])
@@ -727,7 +728,7 @@ model CapiAssignment {
 
 /// One person to call for a CATI survey (Milestone 9). The phone number is sealed with SecretBox.
 model CatiCase {
-  id              String         @id @default(cuid())
+  id              String         @id @default(cuid()) @map("_id")
   tenantId        String
   surveyId        String
   survey          Survey         @relation(fields: [surveyId], references: [id])
@@ -765,7 +766,7 @@ model CatiCase {
 
 /// Milestone 18: when a survey's cases may be called, in the respondent's local time.
 model CatiSettings {
-  surveyId  String   @id
+  surveyId  String   @id @map("_id")
   tenantId  String
   /// Used for cases without their own time zone.
   timeZone  String   @default("UTC")
@@ -779,7 +780,7 @@ model CatiSettings {
 
 /// Milestone 18: numbers the organization must not call, as keyed hashes (never the number).
 model DoNotCall {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   phoneHash   String
   /// Last three digits, so an administrator can tell entries apart.
@@ -796,7 +797,7 @@ model DoNotCall {
 /// One call attempt on a case, with its disposition.
 /// Milestone 19: a survey's phone dialer settings. No row: interviewers dial by hand.
 model CatiDialer {
-  surveyId        String   @id
+  surveyId        String   @id @map("_id")
   tenantId        String
   enabled         Boolean  @default(false)
   /// Record calls (both sides) and keep the recording with the interview.
@@ -809,7 +810,7 @@ model CatiDialer {
 /// Milestone 19: one call placed by the dialer. The interviewer's phone rings first; the respondent
 /// is dialled when the interviewer answers. The id is random and appears in the provider's webhooks.
 model CatiDial {
-  id               String    @id
+  id               String    @id @map("_id")
   tenantId         String
   surveyId         String
   caseId           String
@@ -838,7 +839,7 @@ model CatiDial {
 }
 
 model CatiCall {
-  id            String    @id @default(cuid())
+  id            String    @id @default(cuid()) @map("_id")
   tenantId      String
   caseId        String
   case          CatiCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
@@ -856,7 +857,7 @@ model CatiCall {
 /// Organization API key (Milestone 6). Acts as the member who created it, with at most the key's
 /// role. Only a SHA-256 hash of the secret is stored; the full key is shown once.
 model ApiKey {
-  id          String    @id @default(cuid())
+  id          String    @id @default(cuid()) @map("_id")
   tenantId    String
   createdById String
   createdBy   User      @relation(fields: [createdById], references: [id])
@@ -876,7 +877,7 @@ model ApiKey {
 
 /// Outbound webhook subscription (Milestone 6). Payloads are signed and never carry answers.
 model Webhook {
-  id          String            @id @default(cuid())
+  id          String            @id @default(cuid()) @map("_id")
   tenantId    String
   url         String
   description String?
@@ -895,7 +896,7 @@ model Webhook {
 
 /// Outbox row for one webhook event: delivered by the background worker with retries.
 model WebhookDelivery {
-  id             String        @id @default(cuid())
+  id             String        @id @default(cuid()) @map("_id")
   tenantId       String
   webhookId      String
   webhook        Webhook       @relation(fields: [webhookId], references: [id], onDelete: Cascade)
@@ -927,7 +928,7 @@ enum JobStatus {
 /// Background job (Milestone 7): exports, QA runs, AI drafts. Run by the job worker, which claims
 /// rows with FOR UPDATE SKIP LOCKED and a lease, so several workers can run safely.
 model Job {
-  id              String       @id @default(cuid())
+  id              String       @id @default(cuid()) @map("_id")
   tenantId        String
   /// export | qa_run | ai_propose
   type            String
@@ -961,7 +962,7 @@ model Job {
 /// A file kept in the file store (Milestone 7): export results and uploaded documents for AI jobs.
 /// The bytes live in the FileStore (local disk or object storage), never in the database.
 model StoredFile {
-  id          String    @id @default(cuid())
+  id          String    @id @default(cuid()) @map("_id")
   tenantId    String
   surveyId    String?
   jobId       String?
@@ -984,7 +985,7 @@ model StoredFile {
 
 /// A saved analysis (Milestone 10): filters plus frequencies or a crosstab definition.
 model Report {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   surveyId    String
   survey      Survey   @relation(fields: [surveyId], references: [id])
@@ -1002,7 +1003,7 @@ model Report {
 /// served publicly to respondents. Kept while any version uses it; never expires.
 model MediaAsset {
   /// 22-character random id (not a cuid): it is the public URL, so it must not be guessable.
-  id          String    @id
+  id          String    @id @map("_id")
   tenantId    String
   surveyId    String
   survey      Survey    @relation(fields: [surveyId], references: [id])
@@ -1024,7 +1025,7 @@ model MediaAsset {
 /// survey can open it, and every view is audited. Files live in the file store.
 model Capture {
   /// 22-character random id.
-  id                 String    @id
+  id                 String    @id @map("_id")
   tenantId           String
   surveyId           String
   responseId         String?
@@ -1055,7 +1056,7 @@ model Capture {
 
 /// A device or network an organization blocked after rejecting fraud (Milestone 12). Only keyed hashes.
 model FraudBlock {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   /// device | network
   kind        String
@@ -1072,7 +1073,7 @@ model FraudBlock {
 /// Milestone 20: a session that was signed out before it expired. Rows are removed once the session
 /// would have expired anyway.
 model RevokedSession {
-  jti       String   @id
+  jti       String   @id @map("_id")
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
@@ -1084,7 +1085,7 @@ model RevokedSession {
 /// password" (createdById null, emailed only). Only a SHA-256 hash of the token is stored; a link
 /// works once, until expiresAt, and creating a new one for the member voids the older ones.
 model PasswordReset {
-  id          String    @id @default(cuid())
+  id          String    @id @default(cuid()) @map("_id")
   tenantId    String
   userId      String
   tokenHash   String    @unique
@@ -1106,7 +1107,7 @@ enum LibraryItemKind {
 /// Blueprint phase 1: the organization's question bank. A QUESTION item holds one question (without
 /// its page); a SURVEY item holds a whole definition used as an organization template.
 model LibraryItem {
-  id          String          @id @default(cuid())
+  id          String          @id @default(cuid()) @map("_id")
   tenantId    String
   kind        LibraryItemKind
   name        String
@@ -1123,7 +1124,7 @@ model LibraryItem {
 /// Blueprint phase 2: the organization's translation glossary. Terms are sent with AI translation
 /// requests and checked by per-language QA.
 model GlossaryTerm {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   /// Target language tag, e.g. "fr" or "es-MX".
   language    String
@@ -1139,18 +1140,19 @@ model GlossaryTerm {
 
 /// Blueprint phase 2: how often each page of a least-fill block has been picked for a respondent.
 model BlockExposure {
+  id String @id @default(cuid()) @map("_id")
   surveyId String
   blockId  String
   pageId   String
   count    Int    @default(0)
 
-  @@id([surveyId, blockId, pageId])
+  @@unique([surveyId, blockId, pageId])
 }
 
 /// Blueprint phase 2: saved QA test cases of a survey (answers plus expectations), run against
 /// every draft as a regression suite.
 model QaTestCase {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   tenantId    String
   surveyId    String
   name        String
@@ -1181,7 +1183,7 @@ enum BackCheckState {
 /// A completed CAPI interview drawn for verification: a supervisor calls or visits the respondent,
 /// or listens to the recording, and records whether the interview really took place as recorded.
 model BackCheck {
-  id            String          @id @default(cuid())
+  id            String          @id @default(cuid()) @map("_id")
   tenantId      String
   surveyId      String
   responseId    String          @unique
@@ -1209,7 +1211,7 @@ enum AppealState {
 
 /// An interviewer asks for a quality decision on one of their interviews to be looked at again.
 model QualityAppeal {
-  id           String      @id @default(cuid())
+  id           String      @id @default(cuid()) @map("_id")
   tenantId     String
   surveyId     String
   /// One appeal per interview.
@@ -1228,7 +1230,7 @@ model QualityAppeal {
 
 /// Someone a survey can be sent to by email (blueprint distribution).
 model Contact {
-  id             String    @id @default(cuid())
+  id             String    @id @default(cuid()) @map("_id")
   tenantId       String
   surveyId       String
   /// Email or phone (or both); blueprint phase 5 adds phone for SMS invitations.
@@ -1261,7 +1263,7 @@ enum DistributionChannel {
 }
 
 model Distribution {
-  id              String              @id @default(cuid())
+  id              String              @id @default(cuid()) @map("_id")
   tenantId        String
   surveyId        String
   name            String
@@ -1293,7 +1295,7 @@ enum InvitationState {
 }
 
 model Invitation {
-  id             String          @id @default(cuid())
+  id             String          @id @default(cuid()) @map("_id")
   tenantId       String
   distributionId String
   distribution   Distribution    @relation(fields: [distributionId], references: [id], onDelete: Cascade)
@@ -1317,7 +1319,7 @@ model Invitation {
 /// An automation rule: when the trigger happens (a survey event or a schedule) and every condition
 /// holds, run the actions, or hold them for an administrator's approval first.
 model AutomationRule {
-  id               String          @id @default(cuid())
+  id               String          @id @default(cuid()) @map("_id")
   tenantId         String
   name             String
   enabled          Boolean         @default(true)
@@ -1357,7 +1359,7 @@ enum AutomationRunState {
 
 /// One firing of a rule: the event it saw, whether its conditions held, and what each action did.
 model AutomationRun {
-  id          String             @id @default(cuid())
+  id          String             @id @default(cuid()) @map("_id")
   tenantId    String
   ruleId      String
   rule        AutomationRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
@@ -1380,7 +1382,7 @@ model AutomationRun {
 
 /// An in-app notification for one member.
 model Notification {
-  id        String    @id @default(cuid())
+  id        String    @id @default(cuid()) @map("_id")
   tenantId  String
   userId    String
   title     String
@@ -1396,7 +1398,7 @@ model Notification {
 /// Super admin: a subscription plan. Its features are listed separately for the web CRM and the
 /// mobile app; its limits have the shape of PlanLimits (apps/api/src/plans/plans.ts).
 model SubscriptionPlan {
-  code           String   @id
+  code           String   @id @map("_id")
   name           String
   description    String   @default("")
   /// Price per interval in the smallest currency unit (display only; Stripe prices are separate).
@@ -1415,7 +1417,7 @@ model SubscriptionPlan {
 
 /// Super admin automation: when a trigger matches an organization, run the actions.
 model PlatformAutomation {
-  id          String                  @id @default(cuid())
+  id          String                  @id @default(cuid()) @map("_id")
   name        String
   enabled     Boolean                 @default(true)
   /// org_created, subscription_ending, subscription_ended, completes_used, seats_full, admins_inactive.
@@ -1433,7 +1435,7 @@ model PlatformAutomation {
 
 /// One firing of a platform automation for one organization. dedupeKey makes each firing happen once.
 model PlatformAutomationRun {
-  id           String             @id @default(cuid())
+  id           String             @id @default(cuid()) @map("_id")
   automationId String
   automation   PlatformAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
   tenantId     String
@@ -1450,7 +1452,7 @@ model PlatformAutomationRun {
 /// Rate-limit counters shared by every API process (security review S4, THROTTLE_STORE=database).
 model RateLimitBucket {
   /// "<throttler>:<client and route>", as built by the throttler guard.
-  key          String    @id
+  key          String    @id @map("_id")
   hits         Int
   windowEnds   DateTime
   blockedUntil DateTime?
@@ -1464,7 +1466,7 @@ model RateLimitBucket {
 /// SAMPLEON's signed events. `sourcePlatform` is "ZAPX" (the SAMPLEON wire value) for independent surveys (SampCode created the
 /// request) and PROJEXA when PROJEXA created it for a PROJEXA-linked survey.
 model SampleonAudienceRequest {
-  id                String    @id @default(cuid())
+  id                String    @id @default(cuid()) @map("_id")
   tenantId          String
   surveyId          String
   /// SAMPLEON's Audience Request ID (AR-…), the correlation id of every event.
@@ -1491,7 +1493,7 @@ model SampleonAudienceRequest {
 
 /// SAMPLEON events already processed (deduplicated by event id).
 model SampleonInboundEvent {
-  eventId           String   @id
+  eventId           String   @id @map("_id")
   type              String
   audienceRequestId String?
   receivedAt        DateTime @default(now())

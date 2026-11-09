@@ -35,7 +35,7 @@ SampCode is a survey programming, testing, hosting and fieldwork platform for ma
 | CATI (phone)                         | call lists, queue, dispositions, calling hours, do-not-call, Twilio dialer                                                                | `apps/api/src/cati`                                                                                                                      |
 | Distribution                         | contacts, email (SendGrid) and SMS (Twilio) invitation waves, reminders, unsubscribe                                                      | `apps/api/src/distribution`                                                                                                              |
 | Data, analysis and reports           | CSV/Excel export, frequencies, crosstabs with significance, weighting, saved reports, dashboards, MaxDiff/conjoint, AI research assistant | `apps/api/src/exports`, `analysis`, `packages/analysis-core`                                                                             |
-| Background jobs and files            | job queue in PostgreSQL, worker process, local disk or S3 file store, housekeeping                                                        | `apps/api/src/jobs`, `apps/api/src/worker.ts`                                                                                            |
+| Background jobs and files            | job queue in the database, worker process, local disk or S3 file store, housekeeping                                                      | `apps/api/src/jobs`, `apps/api/src/worker.ts`                                                                                            |
 | Enterprise                           | API keys, audit log, SSO (OIDC and SAML), SCIM, plans and Stripe billing                                                                  | `apps/api/src/enterprise`, `auth/sso*`, `auth/saml.service.ts`, `scim`, `plans`                                                          |
 | Automation and governance _(PR #34)_ | rules (trigger → conditions → actions), notifications, residency, retention erasure                                                       | `apps/api/src/automation`, `governance`                                                                                                  |
 | Design system _(PR #27/#29/#39)_     | studio themes, appearance preferences, sidebar shell, dashboard, neon `PageHeader` on every page, neon CAPI palette                       | `packages/quantum`, `apps/studio/components/quantum`, `components/Shell.tsx`, `apps/studio/app/neon-pages.css`, `apps/api/src/dashboard` |
@@ -51,7 +51,7 @@ SampCode is a survey programming, testing, hosting and fieldwork platform for ma
 | Language          | TypeScript 5.8 everywhere (strict), Node.js 26 LTS                                                                                                                             |
 | Monorepo          | pnpm 10.28 workspaces (`pnpm-workspace.yaml`) and Turborepo 2.5 (`turbo.json`)                                                                                                 |
 | Backend           | NestJS 11 on Express (`apps/api`), Zod 4 for validation, `@nestjs/throttler` for rate limits, `@nestjs/jwt` for sessions                                                       |
-| Database          | PostgreSQL 16 through Prisma 6.10 (`packages/db`)                                                                                                                              |
+| Database          | MongoDB 7+ (replica set) through Prisma 6.10 (`packages/db`; ADR 0040)                                                                                                         |
 | Studio            | Next.js 15.5 (App Router, all pages are client components), React 19.1, CodeMirror 6, lucide-react icons, Geist fonts, plain CSS with custom properties (no Tailwind)          |
 | Runtime, CAPI app | Vite 6 + React 19 (static files served by nginx in production); CAPI uses a service worker and IndexedDB                                                                       |
 | Mobile app        | Expo SDK 58 with Expo Router, React Native, `expo-secure-store` for the token; its own npm project and lockfile in `apps/mobile`, outside the pnpm workspace _(PR #40)_        |
@@ -100,7 +100,7 @@ flowchart LR
     W2[CallbackWorker<br/>if CALLBACK_WORKER=on]
   end
   WK[Worker process<br/>apps/api/dist/worker.js]
-  DB[(PostgreSQL 16)]
+  DB[(MongoDB)]
   FS[(File store<br/>local disk or S3)]
   EXT[Vendors, PROJEXA, webhooks,<br/>Claude, Twilio, SendGrid, IPinfo, Deepgram, Stripe]
 
@@ -135,7 +135,7 @@ Key points in plain language:
   quality scoring and statistics are framework-free packages in `packages/`, used by the API and the
   browsers alike.
 - **Background work in the database.** Jobs, callbacks, webhooks, emails and automation runs are rows
-  in PostgreSQL that a worker loop picks up. No Redis or message queue is used.
+  in the database that a worker loop picks up. No Redis or message queue is used.
 
 ## 3. How the application starts
 
@@ -154,8 +154,7 @@ Key points in plain language:
    accepting `application/scim+json`, and keeping raw bytes for `/api/billing/webhook`), the `/api`
    prefix, `trust proxy`, the edge-trust middleware (`edgeTrust`) and the security headers
    (`securityHeaders`).
-5. `PrismaService.onModuleInit` (`apps/api/src/common/prisma.service.ts`) connects to PostgreSQL and
-   checks whether the database role bypasses row-level security (logs a warning if so).
+5. `PrismaService.onModuleInit` (`apps/api/src/common/prisma.service.ts`) connects to MongoDB.
 6. `JobWorker.onApplicationBootstrap` starts the job loop if `JOB_WORKER=on`; `CallbackWorker` does
    the same if `CALLBACK_WORKER=on`.
 7. The API listens on `API_PORT` (4000).
@@ -187,7 +186,7 @@ sequenceDiagram
   participant B as Studio page (browser)
   participant N as Next.js server :3000
   participant A as API :4000
-  participant D as PostgreSQL
+  participant D as MongoDB
   B->>N: fetch('/api/surveys/abc', cookie zapx_token, x-zapx-csrf: 1)
   N->>A: rewrite to http://localhost:4000/api/surveys/abc
   A->>A: ThrottlerGuard (rate limit)
@@ -266,7 +265,7 @@ flowchart TD
   E -- yes --> F[Controller method:<br/>parseBody with a Zod schema]
   F -- invalid --> F1[400 with issues list]
   F --> G[Service: tenant and project<br/>scoping via AccessService, business rules]
-  G --> H[(Prisma → PostgreSQL)]
+  G --> H[(Prisma → MongoDB)]
   G --> I[AuditService.record]
   G --> J[Webhooks / outbox / jobs]
   G --> K[JSON response]
@@ -284,7 +283,7 @@ flowchart TD
    with assigned access, the project membership. Something outside your access answers **404**, not
    403, so ids are not confirmed.
 6. **Work and storage**: services use `PrismaService`. Studio reads of respondent data use
-   `prisma.forTenant(tenantId)`, which sets `app.tenant_id` for PostgreSQL row-level security.
+   `prisma.forTenant(tenantId)`, which adds the organization to every filter on respondent data.
 7. **Audit**: changes call `AuditService.record(actor, action, entityType, entityId, data)`.
 8. **Response**: the method's return value is sent as JSON. Files are streamed with
    `apps/api/src/common/send-bytes.ts` or `res.send`.
@@ -374,7 +373,7 @@ sequenceDiagram
   participant V as Vendor / panel
   participant R as Runtime (browser)
   participant A as API (InterviewService)
-  participant D as PostgreSQL
+  participant D as MongoDB
   participant O as Outbox workers
   V->>R: respondent opens /s/SURVEY?vid=SE&uid=123&cc=US
   R->>A: POST /api/public/s/SURVEY/start {query, client}
@@ -493,6 +492,6 @@ can run safely because rows are claimed with `SKIP LOCKED`.
 | `apps/mobile/src/lib/features.ts` _(PR #40)_                                          | must list the same feature keys as the server catalog (a test in `apps/mobile/test` checks it)                                               |
 | `apps/api/src/config.ts`                                                              | a new required variable stops every environment that lacks it                                                                                |
 | `apps/api/src/platform/secret-box.ts`, `JWT_SECRET`, `SECRETS_KEY`                    | changing the key makes stored vendor partner secrets, SSO secrets, webhook secrets, phone numbers and CRM integration keys unreadable        |
-| `packages/db/prisma/schema.prisma` and `migrations/`                                  | never edit an applied migration; destructive changes need two releases                                                                       |
+| `packages/db/prisma/schema.prisma` and `src/indexes.ts`                               | changes stay additive; removing a field needs two releases                                                                                   |
 | `apps/api/src/capi/capi.service.ts`                                                   | server replay of offline interviews; must accept data from older app versions still in the field                                             |
 | `apps/capi/public/sw.js`, `apps/capi/src/store.ts`                                    | offline cache and IndexedDB on interviewers' devices; a bad change can strand unsynced interviews                                            |

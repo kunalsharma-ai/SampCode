@@ -5,7 +5,7 @@ Each problem below follows the same shape: **symptom**, **likely causes**, **fil
 [First checks](#first-checks): they answer most questions in a minute.
 
 Commands assume you are in the repository root with `.env` loaded (`set -a; . ./.env; set +a`) where
-`psql "$DATABASE_URL"` is used.
+`mongosh "$DATABASE_URL"` is used.
 
 ## First checks
 
@@ -13,11 +13,11 @@ Commands assume you are in the repository root with `.env` loaded (`set -a; . ./
 curl -s http://localhost:4000/api/health          # {"ok":true} = API up and database reachable
 docker compose ps                                  # which containers run (if you use Docker)
 docker compose logs --tail 100 api worker          # API and worker logs
-psql "$DATABASE_URL" -c 'select 1'                 # database reachable from your shell
+mongosh "$DATABASE_URL" --quiet --eval 'db.runCommand({ ping: 1 }).ok'  # database reachable
 git branch --show-current && git log -1 --oneline  # which code you are actually running
 ```
 
-`GET /api/health` (`apps/api/src/health.controller.ts`) runs `SELECT 1`, so a 500 there means the
+`GET /api/health` (`apps/api/src/health.controller.ts`) runs a `ping` command, so a 500 there means the
 database, not the API, is the problem. On AWS the same URL is the container and load-balancer health
 check (`infra/terraform/ecs.tf`, `infra/terraform/edge.tf`).
 
@@ -35,23 +35,23 @@ the API's `message`.
 
 ## Quick index
 
-| Symptom                                               | Section                                                                           |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------- |
-| API exits at once with `Invalid configuration: …`     | [1. App does not start](#1-app-does-not-start)                                    |
-| `EADDRINUSE`, port already used                       | [1. App does not start](#1-app-does-not-start)                                    |
-| Studio page blank, "Something went wrong", 404 pages  | [2. Frontend errors](#2-frontend-errors)                                          |
-| 500 Internal server error                             | [3. Backend errors](#3-backend-errors)                                            |
-| 400 / 403 / 404 / 409 / 422 / 429 from the API        | [4. API failures](#4-api-failures)                                                |
-| `Can't reach database server`, P1001, migrations fail | [5. Database connection](#5-database-connection)                                  |
-| Login fails, keeps returning to login, locked account | [6. Authentication](#6-authentication)                                            |
-| Saved but not shown, answers missing, wrong counts    | [7. Data not saving or displaying](#7-data-not-saving-or-displaying)              |
-| Export never finishes, download 404, upload rejected  | [8. File upload and download](#8-file-upload-and-download)                        |
-| Vendor callbacks or webhooks not arriving             | [9. Background work](#9-background-work-jobs-callbacks-webhooks)                  |
-| Docker build or AWS release fails                     | [10. Server and deployment](#10-server-and-deployment)                            |
-| Slow pages, timeouts                                  | [11. Performance](#11-performance)                                                |
-| `FEATURE_DISABLED`, `ORG_SUSPENDED`, super admin      | [12. Super admin, plans and features](#12-super-admin-plans-and-features-_pr-41_) |
-| Integration key saved in the CRM has no effect        | [13. Integrations set in the CRM](#13-integrations-set-in-the-crm-_pr-38_)        |
-| Mobile app cannot sign in, screens missing            | [14. Mobile app](#14-mobile-app-_pr-40_)                                          |
+| Symptom                                                  | Section                                                                           |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| API exits at once with `Invalid configuration: …`        | [1. App does not start](#1-app-does-not-start)                                    |
+| `EADDRINUSE`, port already used                          | [1. App does not start](#1-app-does-not-start)                                    |
+| Studio page blank, "Something went wrong", 404 pages     | [2. Frontend errors](#2-frontend-errors)                                          |
+| 500 Internal server error                                | [3. Backend errors](#3-backend-errors)                                            |
+| 400 / 403 / 404 / 409 / 422 / 429 from the API           | [4. API failures](#4-api-failures)                                                |
+| `Can't reach database server`, P1001, `db:migrate` fails | [5. Database connection](#5-database-connection)                                  |
+| Login fails, keeps returning to login, locked account    | [6. Authentication](#6-authentication)                                            |
+| Saved but not shown, answers missing, wrong counts       | [7. Data not saving or displaying](#7-data-not-saving-or-displaying)              |
+| Export never finishes, download 404, upload rejected     | [8. File upload and download](#8-file-upload-and-download)                        |
+| Vendor callbacks or webhooks not arriving                | [9. Background work](#9-background-work-jobs-callbacks-webhooks)                  |
+| Docker build or AWS release fails                        | [10. Server and deployment](#10-server-and-deployment)                            |
+| Slow pages, timeouts                                     | [11. Performance](#11-performance)                                                |
+| `FEATURE_DISABLED`, `ORG_SUSPENDED`, super admin         | [12. Super admin, plans and features](#12-super-admin-plans-and-features-_pr-41_) |
+| Integration key saved in the CRM has no effect           | [13. Integrations set in the CRM](#13-integrations-set-in-the-crm-_pr-38_)        |
+| Mobile app cannot sign in, screens missing               | [14. Mobile app](#14-mobile-app-_pr-40_)                                          |
 
 ---
 
@@ -234,56 +234,51 @@ Code: `apps/api/src/integrations/vendor-api.controller.ts`.
 
 ### 5a. `Can't reach database server at …` (Prisma P1001) or health returns 500
 
-- **Causes:** PostgreSQL not running, wrong host/port in `DATABASE_URL`, or (on AWS) the parts
+- **Causes:** MongoDB not running, wrong host/port in `DATABASE_URL`, or (on AWS) the parts
   `DB_HOST`, `DB_USER`, `DB_PASSWORD` not reaching the task. `apps/api/src/database-url.ts` builds
   `DATABASE_URL` from those parts only when `DATABASE_URL` itself is empty.
 - **Commands:**
   ```bash
-  docker compose up -d postgres && docker compose ps postgres
-  psql "$DATABASE_URL" -c 'select version()'
-  pg_isready -h localhost -p 5432
+  docker compose up -d mongo && docker compose ps mongo
+  mongosh "$DATABASE_URL" --quiet --eval 'db.version()'
   ```
-- **Fix:** start PostgreSQL 16; correct the URL. Inside Docker the host is `postgres`, outside it is
-  `localhost`.
+- **Fix:** start MongoDB; correct the URL. Inside Docker the host is `mongo`, outside it is
+  `localhost` (with `directConnection=true` for the one-member replica set).
 - **Confirm:** `curl -s localhost:4000/api/health` returns `{"ok":true}`.
 
-### 5b. `The table "public.X" does not exist` or a column is missing
+### 5b. `Transactions are not supported by this deployment` (Prisma P2031)
 
-- **Cause:** migrations were not applied after pulling or switching branches. Each PR in the stack
-  adds migrations (`packages/db/prisma/migrations/`).
-- **Commands / fix:** `pnpm db:migrate` (runs `prisma migrate deploy`), then restart the API.
-- **Check:** `psql "$DATABASE_URL" -c 'select migration_name, finished_at from _prisma_migrations order by started_at desc limit 5'`.
-- **Confirm:** the error is gone and `pnpm --filter @zapx/api test` passes.
+- **Cause:** MongoDB runs as a single server, not a replica set. Prisma needs a replica set for
+  transactions.
+- **Fix:** start it with `--replSet rs0` and run `rs.initiate()` once (`docker compose up -d mongo`
+  does both), or use a managed cluster.
 
-Switching **back** to an older branch leaves newer tables in place; Prisma does not undo migrations.
-For a clean local database: `dropdb zapx && createdb zapx && pnpm db:migrate && pnpm db:seed`
+### 5c. Duplicate key error on a new unique field, or `db:migrate` fails
+
+- **Cause:** `pnpm db:migrate` (`packages/db/src/indexes.ts`) creates the indexes the schema declares.
+  A new unique index fails when existing documents already break it; an index whose options changed
+  fails because one with the same name exists.
+- **Fix:** clean up the duplicates, or drop the old index (`db.<Collection>.dropIndex('<name>')`), then
+  run `pnpm db:migrate` again. On production take a backup first (see [DEPLOYMENT.md](DEPLOYMENT.md)).
+- **Confirm:** it prints `MongoDB collections and N indexes are in place`.
+
+For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' && pnpm db:migrate && pnpm db:seed`
 (local only, it deletes everything).
 
-### 5c. Migration fails (`P3009 failed migrations`, `P3018`)
+### 5d. Rows "disappear" for one tenant (Response, Capture, CATI, contacts)
 
-- **Cause:** a migration failed half-way, usually because existing data breaks a new constraint.
-- **Commands:** `pnpm --filter @zapx/db exec prisma migrate status`.
-- **Fix:** fix the data or the migration SQL, then
-  `pnpm --filter @zapx/db exec prisma migrate resolve --rolled-back <migration_name>` and run
-  `pnpm db:migrate` again. On production take a backup first (see [DEPLOYMENT.md](DEPLOYMENT.md)).
-- **Confirm:** `prisma migrate status` reports "Database schema is up to date".
-
-### 5d. Rows "disappear" for one tenant (Response, Capture)
-
-- **Cause:** row-level security (`zapx_tenant_isolation`, ADR 0012) hides rows whose `tenantId` does
-  not match the session setting the API sets per request. Queries run outside that path (for
-  example a raw query in new code) see nothing, or everything if run as a superuser.
+- **Cause:** `PrismaService.forTenant(tenantId)` (ADR 0040) adds the tenant to every filter on the
+  respondent-data models. A query through it for another tenant's data finds nothing; one through
+  the plain client sees every tenant (and must filter `tenantId` itself).
 - **Files:** [DATABASE.md](DATABASE.md#5-indexes-unique-rules-and-database-level-security),
   `apps/api/src/common/prisma.service.ts`.
-- **Steps:** compare the result as the app user and as a superuser.
-- **Fix:** run queries on these tables through `PrismaService.forTenant(tenantId)`, which wraps each
-  query in a transaction that first runs `set_config('app.tenant_id', …)`.
+- **Fix:** run studio reads of these models through `forTenant` with the signed-in user's tenant.
 
-### 5e. `too many connections`
+### 5e. Connection pool timeouts
 
-- **Cause:** each API, worker and test process opens its own Prisma pool. Set
-  `DB_CONNECTION_LIMIT` (AWS parts) or `?connection_limit=N` in `DATABASE_URL`.
-- **Commands:** `psql "$DATABASE_URL" -c 'select count(*), application_name from pg_stat_activity group by 2'`.
+- **Cause:** each API, worker and test process opens its own pool. Set `DB_CONNECTION_LIMIT` (AWS
+  parts) or `&maxPoolSize=N` in `DATABASE_URL`.
+- **Commands:** `mongosh "$DATABASE_URL" --quiet --eval 'db.serverStatus().connections'`.
 
 ---
 
@@ -321,8 +316,8 @@ For a clean local database: `dropdb zapx && createdb zapx && pnpm db:migrate && 
 - **Fix:** wait for the lock to end, or reset the member's password (6b): a reset clears the lock.
   There is no separate unlock button. To unlock without a reset, clear the lock in the database
   (this changes data; do it deliberately):
-  ```sql
-  UPDATE "User" SET "failedLogins" = 0, "lockedUntil" = NULL WHERE email = '<email>';
+  ```bash
+  mongosh "$DATABASE_URL" --eval "db.User.updateOne({ email: '<email>' }, { \$set: { failedLogins: 0, lockedUntil: null } })"
   ```
 - **Confirm:** the next correct password signs in.
 
@@ -365,17 +360,17 @@ For a clean local database: `dropdb zapx && createdb zapx && pnpm db:migrate && 
 ### 7c. Answers or completes missing in reports
 
 - **Causes:** test responses (links with `test=1` and a valid `tsig`) are kept apart from real data;
-  responses removed by data cleaning or quality review; weighting or filters in the report; RLS
+  responses removed by data cleaning or quality review; weighting or filters in the report; tenant isolation
   (see 5d); or the response is still in progress.
 - **Commands:**
-  ```sql
-  SELECT status, "isTest", "reviewState", count(*) FROM "Response"
-  WHERE "surveyId" = '<id>' GROUP BY 1, 2, 3 ORDER BY 1;
+  ```bash
+  mongosh "$DATABASE_URL" --eval "db.Response.aggregate([{ \$match: { surveyId: '<id>' } },
+    { \$group: { _id: { status: '\$status', isTest: '\$isTest', reviewState: '\$reviewState' }, n: { \$sum: 1 } } }])"
   ```
   `status` is one of `IN_PROGRESS`, `COMPLETE`, `TERMINATE`, `QUOTA_FULL`, `QUALITY_FAIL`,
   `SECURITY_REJECT`, `DUPLICATE`, `PARTIAL`. A complete moved to `QUALITY_FAIL` by review no longer
-  counts as a complete. Run this as a database superuser or through `forTenant` (see 5d).
-- **Confirm:** counts in SQL match the report once filters are cleared.
+  counts as a complete. In the API, read through `forTenant` (see 5d).
+- **Confirm:** the counts match the report once filters are cleared.
 
 ### 7d. Quotas show full or wrong
 
@@ -402,8 +397,8 @@ For a clean local database: `dropdb zapx && createdb zapx && pnpm db:migrate && 
   `JOB_WORKER=off`; the separate `worker` service runs jobs. With `pnpm dev` the API runs the
   worker itself unless `JOB_WORKER=off` is in `.env`.
 - **Commands:**
-  ```sql
-  SELECT id, type, status, attempts, error, "runAfter", "lockedUntil" FROM "Job" ORDER BY "createdAt" DESC LIMIT 10;
+  ```bash
+  mongosh "$DATABASE_URL" --eval 'db.Job.find({}, { type: 1, status: 1, attempts: 1, error: 1, runAfter: 1, lockedUntil: 1 }).sort({ createdAt: -1 }).limit(10)'
   ```
   `docker compose ps worker`; `docker compose logs --tail 100 worker`.
 - **Fix:** start the worker (`docker compose up -d worker` or `node apps/api/dist/worker.js`).
@@ -448,9 +443,8 @@ For a clean local database: `dropdb zapx && createdb zapx && pnpm db:migrate && 
   repeated timeouts (`DEAD` after `maxAttempts`), or the URL points to a private address while
   `CALLBACK_ALLOW_PRIVATE_HOSTS=false`.
 - **Commands:**
-  ```sql
-  SELECT state, "lastHttpStatus", "lastError", attempts, "nextAttemptAt", url
-  FROM "OutboundCallback" ORDER BY "createdAt" DESC LIMIT 20;
+  ```bash
+  mongosh "$DATABASE_URL" --eval 'db.OutboundCallback.find({}, { state: 1, lastHttpStatus: 1, lastError: 1, attempts: 1, nextAttemptAt: 1, url: 1 }).sort({ createdAt: -1 }).limit(20)'
   ```
 - **Studio:** Vendors → the vendor → callback log (`GET /api/vendors/:id/callbacks`); **Replay**
   (`POST /api/callbacks/:id/replay`).
@@ -519,13 +513,12 @@ staging. More in [DEPLOYMENT.md](DEPLOYMENT.md).
 - **Steps:**
   1. Find the slow call in DevTools → Network (Timing).
   2. Time it with curl: `curl -s -o /dev/null -w '%{time_total}\n' -b cookie.txt -H 'x-zapx-csrf: 1' localhost:4000/api/...`.
-  3. In PostgreSQL find slow queries:
-     ```sql
-     SELECT pid, now() - query_start AS running, left(query, 120) FROM pg_stat_activity
-     WHERE state <> 'idle' ORDER BY running DESC;
+  3. In MongoDB find slow operations:
+     ```bash
+     mongosh "$DATABASE_URL" --eval 'db.currentOp({ active: true, secs_running: { $gte: 1 } })'
      ```
-     Run `EXPLAIN ANALYZE` on the query; a `Seq Scan` on a large table means a missing index (add it
-     in `schema.prisma` with `@@index`, then a migration).
+     A `COLLSCAN` in `explain()` on a large collection means a missing index (add it in
+     `schema.prisma` with `@@index`, then `pnpm db:migrate`).
 - **Known heavy areas:** analysis and crosstabs on large surveys (`apps/api/src/analysis/`,
   `packages/analysis-core/`), exports (run as jobs), dashboard aggregates.
 

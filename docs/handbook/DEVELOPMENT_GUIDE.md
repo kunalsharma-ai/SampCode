@@ -8,13 +8,13 @@ the repository's `package.json` files or scripts; they were run on 2026-11-05 on
 
 ### What you need
 
-| Tool       | Version                                       | Check                                     |
-| ---------- | --------------------------------------------- | ----------------------------------------- |
-| Node.js    | 26 LTS (`engines.node >= 26`, `.nvmrc`)       | `node -v`                                 |
-| pnpm       | 10.28.0 (`packageManager`)                    | `pnpm -v` (`corepack enable` installs it) |
-| PostgreSQL | 16                                            | `psql --version`, or use Docker           |
-| Docker     | optional, for the full stack and image builds | `docker info`                             |
-| Terraform  | optional, only for `infra/terraform` checks   | `terraform -version`                      |
+| Tool      | Version                                       | Check                                     |
+| --------- | --------------------------------------------- | ----------------------------------------- |
+| Node.js   | 26 LTS (`engines.node >= 26`, `.nvmrc`)       | `node -v`                                 |
+| pnpm      | 10.28.0 (`packageManager`)                    | `pnpm -v` (`corepack enable` installs it) |
+| MongoDB   | 7 or later, as a replica set                  | `mongod --version`, or use Docker         |
+| Docker    | optional, for the full stack and image builds | `docker info`                             |
+| Terraform | optional, only for `infra/terraform` checks   | `terraform -version`                      |
 
 ### Step by step
 
@@ -31,7 +31,7 @@ cp .env.example .env                     # edit DATABASE_URL if needed; see CONF
 pnpm install
 
 # 4. a database
-docker compose up -d postgres            # PostgreSQL 16 with user/password/db zapx/zapx on :5432
+docker compose up -d mongo               # MongoDB 8, one-member replica set rs0 on :27017
 #   …or your own server:
 #   createuser -P zapx && createdb -O zapx zapx
 
@@ -103,7 +103,7 @@ publish, set it live, and create a link under **Distribution**. Open the link to
 | `pnpm check --quick`                                        | format, lint, build, typecheck and tests only                                                                                                   |
 | `pnpm check --no-e2e` / `--no-docker`                       | skip those steps                                                                                                                                |
 | `pnpm secrets:scan`                                         | look for secrets in tracked files                                                                                                               |
-| `pnpm --filter @zapx/db migrate:dev --name <change>`        | create a migration from schema changes                                                                                                          |
+| `pnpm --filter @zapx/db build && pnpm db:migrate`           | after schema changes: regenerate the client, create new collections and indexes                                                                 |
 | `node apps/api/dist/cli/set-plan.js <org id or email> <free | team                                                                                                                                            | business | enterprise>` | change a plan |
 
 Run `pnpm check` before merging. GitHub Actions does not run on this account, so this is the only
@@ -163,8 +163,8 @@ Example: a "Reports" page at `/reports`.
 Example: a free-text `notes` field on projects.
 
 1. `packages/db/prisma/schema.prisma`: add `notes String?` to `model Project` with a `///` comment.
-2. `pnpm --filter @zapx/db migrate:dev --name project_notes` (creates
-   `packages/db/prisma/migrations/<timestamp>_project_notes/migration.sql`), then `pnpm --filter @zapx/db build`.
+2. `pnpm --filter @zapx/db build`, then `pnpm db:migrate` (creates any new collection and index;
+   there are no SQL migrations).
 3. `apps/api/src/projects/projects.controller.ts`: add `notes: z.string().max(5000).optional()` to
    `createSchema` (and an update route if editing is needed). Controllers that `select` columns
    explicitly must list the new one.
@@ -224,10 +224,10 @@ Example: `GET /api/projects/:id/summary`.
 1. Add the `model` in `schema.prisma` with `id String @id @default(cuid())`, `tenantId String`,
    `createdAt DateTime @default(now())`, and indexes for how you will query it
    (`@@index([tenantId, …])`). Add `deletedAt DateTime?` if it should be soft-deleted.
-2. Create the migration (`migrate:dev`), rebuild `@zapx/db`.
+2. Rebuild `@zapx/db` and run `pnpm db:migrate`.
 3. Access it only from the module's service (or repository), always filtering by `tenantId`.
-4. If it holds respondent data that studio users read, consider a row-level-security policy like the
-   one for `Response` (raw SQL in the migration; see `20261102120000_m6_enterprise`).
+4. If it holds respondent data that studio users read, add it to `TENANT_ISOLATED_MODELS` in
+   `apps/api/src/common/prisma.service.ts` and read it through `prisma.forTenant(tenantId)`.
 5. If rows expire, add a delete to `JobWorker.housekeeping` (`apps/api/src/jobs/job.worker.ts`).
 6. Document it in [DATABASE.md](DATABASE.md) (regenerate the tables or add a section).
 
@@ -260,7 +260,7 @@ Example: `GET /api/projects/:id/summary`.
 
 Roles touch many files; plan carefully.
 
-1. `packages/db/prisma/schema.prisma` `enum Role` + migration.
+1. `packages/db/prisma/schema.prisma` `enum Role`, then rebuild `@zapx/db`.
 2. `apps/api/src/auth/auth.types.ts`: `RoleName` and the `RANK` table used by `lowerRole` (API keys).
 3. `apps/api/src/auth/decorators.ts`: groups such as `CAN_EDIT`, `ALL_ROLES`.
 4. `apps/api/src/auth/auth.guard.ts`: today `INTERVIEWER` is deny-by-default; decide whether the new
@@ -305,7 +305,7 @@ Pure packages have fast unit tests next to the code; write the test first, then 
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Fix login issue                                | `apps/api/src/auth/auth.controller.ts`, `auth.guard.ts`, `session.ts`, `sso.service.ts`, `apps/studio/app/login/page.tsx`, `apps/studio/lib/api.ts`, `.env` (`JWT_SECRET`, `COOKIE_SECURE`) | lockout/disabled state on the `User` row, cookie settings, CSRF header, SSO enforcement (`TenantSso.enforced`) |
 | Add new page                                   | `apps/studio/app/<route>/page.tsx`, `apps/studio/components/Shell.tsx`, `apps/studio/app/globals.css`                                                                                       | new page file, menu item, styles                                                                               |
-| Change database field                          | `packages/db/prisma/schema.prisma`, `packages/db/prisma/migrations/`, the module's controller Zod schema and service, the studio component                                                  | schema + new migration, validation, reads/writes, UI                                                           |
+| Change database field                          | `packages/db/prisma/schema.prisma`, the module's controller Zod schema and service, the studio component                                                                                    | schema (+ `pnpm db:migrate` for indexes), validation, reads/writes, UI                                         |
 | Modify API                                     | the controller and service in `apps/api/src/<module>/`, callers in `apps/studio`, `apps/runtime`, `apps/capi`, `docs/api/openapi.yaml` for partner routes                                   | handler, schema, callers, tests                                                                                |
 | Fix frontend issue                             | the page in `apps/studio/app/`, the component in `apps/studio/components/`, `packages/survey-renderer/src/index.tsx` (respondent screens), `apps/runtime/src/App.tsx`                       | the component; check the browser console and the network tab for the API answer                                |
 | Change business logic                          | `packages/logic-engine`, `packages/redirect-core`, `packages/quality-core`, `packages/analysis-core`, or the module service in `apps/api/src`                                               | the pure function first (with its unit test), then the service                                                 |

@@ -100,7 +100,8 @@ export class TranslateController {
 
     // Merge into the latest presentation so concurrent edits to other texts are kept.
     const saved = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT 1 FROM "SurveyVersion" WHERE "id" = ${draft.id} FOR UPDATE`;
+      // In a MongoDB transaction a concurrent update of this version makes the update below
+      // conflict, and the transaction runs again on the fresh document (PostgreSQL used FOR UPDATE).
       const fresh = await tx.surveyVersion.findUniqueOrThrow({ where: { id: draft.id } });
       const latest = parsePresentation(fresh.presentation);
       const next: Presentation = latest.ok ? latest.presentation : pres.presentation;

@@ -162,12 +162,25 @@ export class GovernanceService {
       const ids = rows.map((r) => r.id);
       await this.captures.dropWhere({ tenantId, responseIds: ids });
       await this.prisma.openEndFingerprint.deleteMany({ where: { responseId: { in: ids } } });
-      await this.prisma.$executeRaw`
-        UPDATE "Response" SET
-          "answers" = '{}', "entryParams" = '{}', "returnUrl" = NULL, "userAgent" = NULL, "ipHash" = NULL,
-          "deviceHash" = NULL, "signals" = '{}', "location" = NULL, "evidence" = NULL, "geoCountry" = NULL,
-          "uid" = 'erased-' || "id", "erasedAt" = now()
-        WHERE "id" = ANY(${ids}) AND "erasedAt" IS NULL`;
+      // Each row gets its own uid ('erased-' + id), so the rows are updated one by one.
+      for (const id of ids)
+        await this.prisma.response.updateMany({
+          where: { id, erasedAt: null },
+          data: {
+            answers: {},
+            entryParams: {},
+            returnUrl: null,
+            userAgent: null,
+            ipHash: null,
+            deviceHash: null,
+            signals: {},
+            location: null,
+            evidence: null,
+            geoCountry: null,
+            uid: `erased-${id}`,
+            erasedAt: new Date(),
+          },
+        });
       erased += ids.length;
     }
     return erased;

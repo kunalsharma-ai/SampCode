@@ -3,7 +3,7 @@
  * Never run against production.
  *   SEED_EMAIL / SEED_PASSWORD and SEED_SUPER_EMAIL / SEED_SUPER_PASSWORD override the defaults.
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from './index';
 import { hash } from 'bcryptjs';
 
 async function main() {

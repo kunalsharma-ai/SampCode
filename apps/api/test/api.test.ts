@@ -1,5 +1,5 @@
 /**
- * API integration tests against a real PostgreSQL database (DATABASE_URL).
+ * API integration tests against a real MongoDB database (DATABASE_URL, a replica set).
  * Each run signs up fresh tenants, so tests do not interfere with other data.
  */
 import 'reflect-metadata';

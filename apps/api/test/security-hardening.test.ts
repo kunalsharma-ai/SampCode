@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/bootstrap';
 import { DbThrottlerStorage, throttleStore } from '../src/common/db-throttler-storage';
-import { PrismaService } from '../src/common/prisma.service';
+import { PrismaService, TENANT_ISOLATED_MODELS } from '../src/common/prisma.service';
 import { signingKey } from '../src/common/signing-keys';
 import { config, resetConfig } from '../src/config';
 import { testSignature } from '../src/interview/interview.service';
@@ -62,7 +62,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.$executeRaw`DELETE FROM "RateLimitBucket" WHERE "key" LIKE ${`test-${run}%`}`;
+  await prisma.rateLimitBucket.deleteMany({ where: { key: { contains: `test-${run}` } } });
   await app?.close();
 });
 
@@ -109,10 +109,10 @@ describe('S4: shared rate-limit store', () => {
     const key = `test-${run}-window`;
     await s.increment(key, 60_000, 5, 60_000, 'default');
     await s.increment(key, 60_000, 5, 60_000, 'default');
-    await prisma.$executeRaw`UPDATE "RateLimitBucket" SET "windowEnds" = now() - interval '2 minutes' WHERE "key" = ${`default:${key}`}`;
+    await prisma.rateLimitBucket.update({ where: { key: `default:${key}` }, data: { windowEnds: new Date(Date.now() - 120_000) } });
     expect((await s.increment(key, 60_000, 5, 60_000, 'default')).totalHits).toBe(1);
 
-    await prisma.$executeRaw`UPDATE "RateLimitBucket" SET "windowEnds" = now() - interval '2 minutes' WHERE "key" = ${`default:${key}`}`;
+    await prisma.rateLimitBucket.update({ where: { key: `default:${key}` }, data: { windowEnds: new Date(Date.now() - 120_000) } });
     expect(await s.sweep()).toBeGreaterThanOrEqual(1);
     expect(await prisma.rateLimitBucket.count({ where: { key: `default:${key}` } })).toBe(0);
   });
@@ -185,41 +185,31 @@ describe('S8: static security rules in the lint', () => {
   });
 });
 
-describe('S9: row-level security on personal-data tables', () => {
+describe('S9: tenant isolation on personal-data tables', () => {
   const tables = ['Response', 'Capture', 'CatiCase', 'CatiCall', 'DoNotCall', 'Contact', 'Invitation', 'BackCheck', 'QualityAppeal'];
 
-  it('has the tenant isolation policy forced on every listed table', async () => {
-    const rows = await prisma.$queryRaw<Array<{ table: string; enabled: boolean; forced: boolean; policy: boolean }>>`
-      SELECT c.relname AS table, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced,
-        EXISTS (SELECT 1 FROM pg_policies p WHERE p.tablename = c.relname AND p.policyname = 'zapx_tenant_isolation') AS policy
-      FROM pg_class c WHERE c.relkind = 'r' AND c.relname = ANY(${tables})`;
-    expect(rows.map((r) => r.table).sort()).toEqual([...tables].sort());
-    for (const r of rows) expect(r, r.table).toMatchObject({ enabled: true, forced: true, policy: true });
+  it('covers every listed table (PostgreSQL row-level security, now applied by forTenant)', () => {
+    for (const t of tables) expect(TENANT_ISOLATED_MODELS.has(t), t).toBe(true);
+    expect(prisma.rls).toBe('enforced');
   });
 
-  it("hides another tenant's rows from a plain database role", async () => {
+  it("hides another tenant's rows even without a tenant filter, and refuses writes for another tenant", async () => {
     const [mine, other] = [`t-${run}-a`, `t-${run}-b`];
-    // A role without BYPASSRLS, like the one production uses, inside a transaction that is rolled back.
-    const visible = await prisma
-      .$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(`DO $$ BEGIN CREATE ROLE zapx_rls_probe NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
-        await tx.$executeRawUnsafe(`GRANT SELECT ON "DoNotCall" TO zapx_rls_probe`);
-        for (const [t, h] of [
-          [mine, 'h1'],
-          [other, 'h2'],
-        ])
-          await tx.$executeRaw`INSERT INTO "DoNotCall" ("id", "tenantId", "phoneHash", "hint", "source") VALUES (${`${t}-${h}`}, ${t}, ${h}, '123', 'manual')`;
-        await tx.$executeRawUnsafe(`SET LOCAL ROLE zapx_rls_probe`);
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${mine}, TRUE)`;
-        const rows = await tx.$queryRaw<
-          Array<{ tenantId: string }>
-        >`SELECT "tenantId" FROM "DoNotCall" WHERE "tenantId" IN (${mine}, ${other})`;
-        throw Object.assign(new Error('rollback'), { rows });
-      })
-      .catch((e: { rows?: Array<{ tenantId: string }> }) => {
-        if (!e.rows) throw e;
-        return e.rows;
-      });
+    for (const [t, h] of [
+      [mine, 'h1'],
+      [other, 'h2'],
+    ])
+      await prisma.doNotCall.create({ data: { id: `${t}-${h}`, tenantId: t, phoneHash: `${run}-${h}`, hint: '123', source: 'manual' } });
+    const db = prisma.forTenant(mine);
+    const visible = await db.doNotCall.findMany({ where: { tenantId: { in: [mine, other] } } });
     expect(visible.map((r) => r.tenantId)).toEqual([mine]);
+    expect(await db.doNotCall.findUnique({ where: { id: `${other}-h2` } })).toBeNull();
+    expect(await db.doNotCall.count({ where: { phoneHash: `${run}-h2` } })).toBe(0);
+    expect((await db.doNotCall.deleteMany({ where: { id: `${other}-h2` } })).count).toBe(0);
+    await expect(db.doNotCall.create({ data: { tenantId: other, phoneHash: `${run}-h3`, hint: '123', source: 'manual' } })).rejects.toThrow(
+      /another organization/,
+    );
+    expect(() => prisma.forTenant('')).toThrow();
+    await prisma.doNotCall.deleteMany({ where: { tenantId: { in: [mine, other] } } });
   });
 });

@@ -506,13 +506,13 @@ describe('audit log viewer', () => {
 // ---- Row-level security ------------------------------------------------------------------------
 
 describe('row-level security on respondent data', () => {
-  it('reports whether Postgres applies it', async () => {
+  it('reports that tenant isolation is applied', async () => {
     const s = (await http.get('/api/audit/security').set(auth).expect(200)).body;
-    expect(['enforced', 'bypassed']).toContain(s.rowLevelSecurity);
+    expect(s.rowLevelSecurity).toBe('enforced');
   });
 
   it("hides other organizations' responses from the tenant-scoped client", async () => {
-    if (prisma.rls !== 'enforced') return; // superuser or BYPASSRLS role: Postgres skips policies.
+    expect(prisma.rls).toBe('enforced');
     const other = await http
       .post('/api/auth/register')
       .send({ organization: `Other ${run}`, name: 'Other', email: `other-${run}@test.zapx`, password: 'correct-horse-battery' })

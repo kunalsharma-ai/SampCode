@@ -562,17 +562,18 @@ describe('billing with Stripe', () => {
 });
 
 describe('running on AWS', () => {
-  it('builds the database URL from the RDS secret parts', () => {
-    expect(databaseUrlFromParts({ DATABASE_URL: 'postgresql://a/b' })).toBe('postgresql://a/b');
+  it('builds the database URL from the secret parts', () => {
+    expect(databaseUrlFromParts({ DATABASE_URL: 'mongodb://a/b' })).toBe('mongodb://a/b');
     expect(databaseUrlFromParts({ DB_HOST: 'db.internal' })).toBeUndefined();
     const url = databaseUrlFromParts({
-      DB_HOST: 'zapx.abc.eu-west-1.rds.amazonaws.com',
+      DB_HOST: 'zapx.abc.eu-west-1.docdb.amazonaws.com',
       DB_USER: 'zapx',
       DB_PASSWORD: 'p@ss:w/rd?#%',
       DB_NAME: 'zapx',
       DB_SSLMODE: 'require',
+      DB_REPLICA_SET: 'rs0',
     })!;
-    expect(url).toBe('postgresql://zapx:p%40ss%3Aw%2Frd%3F%23%25@zapx.abc.eu-west-1.rds.amazonaws.com:5432/zapx?sslmode=require'); // secret-scan:allow (made-up test password)
+    expect(url).toBe('mongodb://zapx:p%40ss%3Aw%2Frd%3F%23%25@zapx.abc.eu-west-1.docdb.amazonaws.com:27017/zapx?tls=true&replicaSet=rs0'); // secret-scan:allow (made-up test password)
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
   });
 

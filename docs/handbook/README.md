@@ -40,16 +40,16 @@ organization and member may use on the web and in the **mobile app** for Android
 
 ## Quick start (local machine)
 
-Needs Node 26 (LTS, see `.nvmrc`), pnpm 10.28 and PostgreSQL 16. Full detail and alternatives (Docker) are in
+Needs Node 26 (LTS, see `.nvmrc`), pnpm 10.28 and MongoDB 7 or later as a replica set. Full detail and alternatives (Docker) are in
 [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md#1-set-up-a-development-machine).
 
 ```bash
 git clone https://github.com/kunalsharma-ai/Sampledge-ZAPX.git && cd Sampledge-ZAPX
-cp .env.example .env                  # then edit DATABASE_URL if your Postgres differs
+cp .env.example .env                  # then edit DATABASE_URL if your MongoDB differs
 pnpm install
-docker compose up -d postgres         # or use your own PostgreSQL 16
+docker compose up -d mongo            # or use your own MongoDB replica set
 pnpm build                            # builds every package and app (also generates the Prisma client)
-pnpm db:migrate                       # creates the tables
+pnpm db:migrate                       # creates the collections and indexes
 pnpm db:seed                          # creates the demo admin (SEED_EMAIL / SEED_PASSWORD, defaults in packages/db/src/seed.ts)
 set -a; . ./.env; set +a
 node apps/api/dist/main.js            # API     http://localhost:4000/api

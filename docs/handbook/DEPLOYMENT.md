@@ -16,7 +16,7 @@ The deeper guides it builds on: [infra/terraform/README.md](../../infra/terrafor
 | Layer                 | Tool                     | Where                                                                                                                                                  | Run it                                                                                               |
 | --------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | Package unit tests    | Vitest                   | `packages/*/src/**/*.test.ts` (logic-engine 19 files, analysis-core 4, survey-schema 2, quality-core 2, redirect-core 1, quantum 1, survey-renderer 1) | `pnpm test` or `pnpm --filter @zapx/logic-engine test`                                               |
-| API integration tests | Vitest + a real database | `apps/api/test/*.test.ts` (one file per milestone or phase, 31 files)                                                                                  | `pnpm --filter @zapx/api test` (needs PostgreSQL at `DATABASE_URL`)                                  |
+| API integration tests | Vitest + a real database | `apps/api/test/*.test.ts` (one file per milestone or phase, 31 files)                                                                                  | `pnpm --filter @zapx/api test` (needs MongoDB at `DATABASE_URL`)                                     |
 | End-to-end (browser)  | Playwright               | `e2e/tests/*.spec.ts` (28 files: `milestone*.spec.ts`, `blueprint*.spec.ts`, `quantum`, `neon`, `eyetracking`, `super-admin`, `security-fixes`)        | `pnpm e2e` (builds must exist; starts API, studio, runtime and CAPI from `e2e/playwright.config.ts`) |
 | Mobile app _(PR #40)_ | Vitest, `tsc`            | `apps/mobile/test/*.test.ts` (API client, logic, entitlements; a test checks the feature keys match the server)                                        | `cd apps/mobile && npm ci && npm run typecheck && npm test` (inside `pnpm check`)                    |
 | Infrastructure        | `terraform test`         | `infra/terraform/tests/plan.tftest.hcl` (mocked provider)                                                                                              | inside `pnpm check` when Terraform is installed                                                      |
@@ -77,12 +77,12 @@ the unprivileged `node` user; `api` has a health check on `/api/health`; `migrat
 
 ```bash
 cp .env.example .env          # then set real secrets for anything beyond a laptop
-docker compose up -d --build  # postgres, migrate (once), api, worker, studio, runtime, capi
+docker compose up -d --build  # mongo, migrate (once), api, worker, studio, runtime, capi
 docker compose ps
 curl -s localhost:4000/api/health
 ```
 
-Ports: studio 3000, API 4000, runtime 5173, CAPI 5174, PostgreSQL 5432. In this setup the `api`
+Ports: studio 3000, API 4000, runtime 5173, CAPI 5174, MongoDB 27017. In this setup the `api`
 service has `JOB_WORKER=off` and `CALLBACK_WORKER=off` and the `worker` service does the background
 work.
 
@@ -96,7 +96,7 @@ path is not documented in the repository; AWS is the documented production targe
 ### Implemented (written, validated, not yet applied)
 
 - **Infrastructure:** `infra/terraform/` creates VPC, ALB, ECS Fargate services (API ×2, worker ×1,
-  studio ×2, with autoscaling for API and studio), RDS PostgreSQL (Multi-AZ, 14-day backups in
+  studio ×2, with autoscaling for API and studio), RDS PostgreSQL (not yet moved to MongoDB, ADR 0040; Multi-AZ, 14-day backups in
   production), S3 buckets, CloudFront for the runtime and CAPI app, WAF (count mode first), KMS,
   Secrets Manager, AWS Backup (35 days), CloudWatch logs and alarms to SNS.
 - **Release script:** `infra/scripts/deploy-aws.sh`.
@@ -194,9 +194,9 @@ ENVIRONMENT=production infra/scripts/deploy-aws.sh "$(git rev-parse --short=12 H
 ```
 
 The script rebuilds and pushes images with that tag, runs migrations (already applied, so nothing
-happens) and rolls the services back. **Database migrations are not undone.** Prisma has no "down"
-migrations; if a release changed the schema in a way the old code cannot use, restore from backup
-or write a new forward migration. Keep schema changes backward-compatible to avoid this.
+happens) and rolls the services back. **Data changes are not undone.** If a release changed
+documents in a way the old code cannot use, restore from backup or fix them with a forward script.
+Keep schema changes backward-compatible to avoid this.
 
 ### Recommended
 
@@ -226,11 +226,10 @@ Rules:
 Restore drill (local):
 
 ```bash
-createdb zapx_restore_test
-DATABASE_URL=postgresql://<user>:<password>@localhost:5432/zapx_restore_test \
-  infra/scripts/restore.sh backups/zapx-<timestamp>.dump
-psql postgresql://<user>:<password>@localhost:5432/zapx_restore_test -c 'select count(*) from "Response"'
-dropdb zapx_restore_test
+DATABASE_URL='mongodb://localhost:27017/zapx_restore_test?directConnection=true' \
+  infra/scripts/restore.sh backups/zapx-<timestamp>.archive.gz
+mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --eval 'db.Response.countDocuments()'
+mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --eval 'db.dropDatabase()'
 ```
 
 ### Recommended
