@@ -54,10 +54,27 @@ not shown to end users. Rename them only with a migration plan:
 - HTTP headers `X-Zapx-Signature`, `X-Zapx-Timestamp`, `X-Zapx-Event`, `X-Zapx-Delivery`, `X-Zapx-Truncated`,
   `X-ZAPX-Client`, `x-zapx-csrf`; User-Agents `ZAPX-Callbacks/1`, `ZAPX-Webhooks/1`
 - API key and SCIM token prefixes `zapx_` and `zapx_scim_`; the `vid=ZAPX_EMAIL` invitation source
-- the SAMPLEON source platform value `ZAPX` (shared contract with SAMPLEON)
+- the SampAudience source platform value `ZAPX` (shared contract with SampAudience)
 - the mobile bundle id / package `com.sampledge.zapx`, the Expo slug and URL scheme `zapx`, the `zapxServer`
   setting and secure-store keys
 - the server identity `service: "zapx"` the mobile app checks, browser storage and cache names (`zapx-capi-*`,
   `zapx.*` keys), the `zapx` theme preset key, the `toZapxXml` / `fromZapxXml` function names
 - the GitHub repository name `Sampledge-ZAPX`
-- historical documents: ADRs 0001 to 0037 and old changelog entries keep the name they were written with.
+- the SampAudience (formerly SAMPLEON) identifiers listed in the next section
+- historical documents: ADRs 0001 to 0038 and old changelog entries keep the name they were written with.
+
+## Other Sampledge product names
+
+Partner products are renamed in everything people read (ADR 0039):
+
+| Old name | Current name | Notes                                                                                                         |
+| -------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
+| SAMPLEON | SampAudience | Logo in `apps/studio/public/brand/sampaudience/`. Integrated (PR #47, [sampleon.md](../modules/sampleon.md)). |
+| Bidzo    | SampBidx     | No adapter yet: its API contract has not been provided.                                                       |
+| PROJEXA  | SampTrek     | Shown as SampTrek in the studio; docs still say PROJEXA for the integration.                                  |
+
+Unchanged on purpose, because partners, stored data and deployments depend on them: the `SAMPLEON` vendor
+code (`vid=SAMPLEON`) and integration value, `SAMPLEON_*` environment variables, the `/api/surveys/{id}/sampleon`
+and `/api/v1/sampleon/events` paths, the `sampleon` service client id, the `Sampleon*` database tables and
+code names (`apps/api/src/sampleon/`, `Sampleon.tsx`), the `source: "SAMPLEON"` event value and the
+`kunalsharma-ai/Sampleon` repository name.

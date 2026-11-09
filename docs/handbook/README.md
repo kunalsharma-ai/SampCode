@@ -93,7 +93,7 @@ can find the pull request, its ADR and its tests.
 | #46 | `neon-confirm-dialogs`         | `main`                         | Neon confirm dialogs (`useConfirm()`) instead of the browser's `window.confirm`                                                                                                                                                         |
 
 PR #28 (`integrations-in-crm`) was merged as part of #38. The Dependabot PRs #20–#25 were closed,
-replaced by #44. Still open: PR #47 (SAMPLEON integration, its own branch; not in this handbook).
+replaced by #44. Still open: PR #47 (SampAudience integration, its own branch; not in this handbook).
 
 ## What has never run against a real service
 

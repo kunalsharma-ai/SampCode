@@ -43,5 +43,6 @@ they are accepted; a later record supersedes an earlier one.
 | [0036](0036-super-admin.md)                      | Super admin: plans, features per surface (web/mobile), platform automation | Accepted                                               |
 | [0037](0037-mobile-app.md)                       | ZAPX mobile app: Expo, live super-admin feature gating                     | Accepted                                               |
 | [0038](0038-rename-to-sampcode.md)               | ZAPX renamed SampCode: user-facing name and artwork, identifiers kept      | Accepted                                               |
+| [0039](0039-sampbidx-sampaudience-names.md)      | Bidzo renamed SampBidx and SAMPLEON renamed SampAudience in user text      | Accepted                                               |
 
 Template: copy an existing record; sections are Context, Decision, Consequences.

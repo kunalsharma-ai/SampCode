@@ -7,6 +7,12 @@ for most, a module guide in [docs/modules/](../modules/).
 The format follows [Keep a Changelog](https://keepachangelog.com/): newest first, grouped by
 release. SampCode (called ZAPX until 2026-11-06) has no version numbers or git tags yet, so entries are grouped by milestone or PR.
 
+## SampBidx and SampAudience names (2026-11-08)
+
+- Bidzo is now called SampBidx and SAMPLEON is now called SampAudience in the docs, handbook and handoff
+  documents (ADR 0039). The studio already showed SampAudience (PR #51). Identifiers such as `SAMPLEON_*`
+  environment variables and the `SAMPLEON` vendor code are unchanged.
+
 ## SAMPLEON, CI, docs and the SampCode name (merged 2026-11-06, PRs #47–#50)
 
 - PR #47, branch `claude/sampleon-survey-host`: SAMPLEON integration (survey host and audience
