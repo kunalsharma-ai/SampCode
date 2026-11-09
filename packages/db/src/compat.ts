@@ -20,7 +20,7 @@ interface ModelInfo {
   /** Optional scalar fields without a default: name, whether it is a JSON field. */
   optional: { name: string }[];
   /** Relation field name to the related model and its foreign key fields. */
-  relations: Map<string, { model: string; fks: string[] }>;
+  relations: Map<string, { model: string; fks: string[]; refs: string[] }>;
   /** Optional scalar fields that can hold null (not JSON, not lists). */
   nullable: Set<string>;
 }
@@ -31,8 +31,8 @@ function info(model: string): ModelInfo | undefined {
   if (!models) {
     models = new Map();
     for (const m of Prisma.dmmf.datamodel.models) {
-      const relations = new Map<string, { model: string; fks: string[] }>();
-      for (const f of m.fields) if (f.kind === 'object') relations.set(f.name, { model: f.type, fks: [...(f.relationFromFields ?? [])] });
+      const relations = new Map<string, { model: string; fks: string[]; refs: string[] }>();
+      for (const f of m.fields) if (f.kind === 'object') relations.set(f.name, { model: f.type, fks: [...(f.relationFromFields ?? [])], refs: [...(f.relationToFields ?? [])] });
       models.set(m.name, {
         optional: m.fields
           .filter((f) => (f.kind === 'scalar' || f.kind === 'enum') && !f.isRequired && !f.isList && !f.hasDefaultValue && !f.isId)
@@ -55,10 +55,11 @@ export function withNulls(model: string, data: unknown): unknown {
   if (!data || typeof data !== 'object') return data;
   const m = info(model);
   if (!m) return data;
-  const out: Data = { ...(data as Data) };
-  // A create that names a relation (connect, create) is a "checked" input: it may not set the
-  // foreign key fields themselves, so those are left to Prisma.
-  const checked = Object.keys(out).some((k) => m.relations.has(k));
+  const out: Data = uncheck(m, { ...(data as Data) });
+  // A create that names a relation it holds the foreign key of (connect, create) is a "checked"
+  // input: it may not set the foreign key fields themselves, so those are left to Prisma. Nested
+  // creates of child rows (events: { create }) are allowed in both kinds.
+  const checked = Object.keys(out).some((k) => (m.relations.get(k)?.fks.length ?? 0) > 0);
   const fks = new Set([...m.relations.values()].flatMap((r) => r.fks));
   for (const f of m.optional) {
     if (out[f.name] !== undefined) continue;
@@ -68,6 +69,30 @@ export function withNulls(model: string, data: unknown): unknown {
   for (const [name, rel] of m.relations) {
     const nested = out[name];
     if (nested && typeof nested === 'object') out[name] = withNestedNulls(rel.model, nested as Data);
+  }
+  return out;
+}
+
+/**
+ * `{ project: { connect: { id } } }` → `{ projectId: id }` when every relation the create names is
+ * such a connect, so the input is "unchecked" and its other foreign keys can be written as null.
+ */
+function uncheck(m: ModelInfo, out: Data): Data {
+  const named = Object.keys(out).filter((k) => (m.relations.get(k)?.fks.length ?? 0) > 0);
+  if (!named.length) return out;
+  const plan: [string, string, unknown][] = [];
+  for (const k of named) {
+    const rel = m.relations.get(k)!;
+    const v = out[k] as Data | undefined;
+    const c = v && typeof v === 'object' && Object.keys(v).length === 1 ? (v.connect as Data | undefined) : undefined;
+    if (rel.fks.length !== 1 || !c || typeof c !== 'object' || Array.isArray(c)) return out;
+    const keys = Object.keys(c);
+    if (keys.length !== 1 || keys[0] !== rel.refs[0] || typeof c[keys[0]!] !== 'string') return out;
+    plan.push([k, rel.fks[0]!, c[keys[0]!]]);
+  }
+  for (const [k, fk, value] of plan) {
+    delete out[k];
+    out[fk] = value;
   }
   return out;
 }
