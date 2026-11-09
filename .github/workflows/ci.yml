@@ -29,6 +29,7 @@ jobs:
       - name: Start MongoDB
         run: |
           docker run -d --name mongo -p 27017:27017 mongo:8.0 --replSet rs0 --bind_ip_all
+          sleep 5; docker ps -a; docker logs mongo 2>&1 | tail -60
           for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' && break; sleep 2; done
           docker exec mongo mongosh --quiet --eval "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
           for i in $(seq 1 30); do docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true && break; sleep 2; done
