@@ -7,6 +7,7 @@
 import 'reflect-metadata';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SurveyDefinition } from '@zapx/survey-schema';
+import { withNulls } from '@zapx/db';
 import { PrismaService } from '../src/common/prisma.service';
 import { claim, createManySkipDuplicates } from '../src/common/mongo-compat';
 import { takeQuotaPlaces } from '../src/quotas/quota-places';
@@ -69,6 +70,13 @@ describe('MongoDB in place of PostgreSQL row locks', () => {
     expect((await createManySkipDuplicates(prisma.doNotCall, 'DoNotCall', rows)).count).toBe(0);
   });
 
+  it('skips a row whose id already exists, also inside a transaction', async () => {
+    const row = { id: `evt-${run}`, type: 'test', tenantId: null };
+    expect((await createManySkipDuplicates(prisma.billingEvent, 'BillingEvent', [row, row])).count).toBe(1);
+    const again = await prisma.$transaction(async (tx) => createManySkipDuplicates(tx.billingEvent, 'BillingEvent', [row]));
+    expect(again.count).toBe(0);
+  });
+
   it('lets any number of rows leave an optional unique field empty, as PostgreSQL did', async () => {
     const surveyId = `s-${run}-contacts`;
     for (let i = 0; i < 3; i++) await prisma.contact.create({ data: { tenantId: `t-${run}`, surveyId, name: `C${i}`, fields: {} } });
@@ -91,5 +99,16 @@ describe('MongoDB in place of PostgreSQL row locks', () => {
     expect(await names({ name: { not: 'gone' } })).toEqual(['never']);
     expect(await names({ phone: { not: '1' } })).toEqual([]);
     expect(await names({ NOT: { unsubscribedAt: { lt: new Date() } } })).toEqual([]);
+  });
+
+  it('writes null foreign keys on creates that also create child rows or connect by id', () => {
+    // A nested child create does not make the input "checked", so vendorId is still written as null.
+    const a = withNulls('Response', { tenantId: 't', surveyId: 's', captures: { create: [] } }) as Record<string, unknown>;
+    expect(a.vendorId).toBeNull();
+    expect(a.interviewerId).toBeNull();
+    // A connect by id becomes the foreign key itself, so the other one can be null too.
+    const b = withNulls('Response', { tenantId: 't', surveyId: 's', vendor: { connect: { id: 'v1' } } }) as Record<string, unknown>;
+    expect(b).toMatchObject({ vendorId: 'v1', interviewerId: null });
+    expect(b.vendor).toBeUndefined();
   });
 });
