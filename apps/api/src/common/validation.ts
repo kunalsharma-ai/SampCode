@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException } from '../http/errors';
 import type { ZodType } from 'zod';
 
 /** Parse an untrusted request body with a zod schema, or throw a 400 listing every problem. */

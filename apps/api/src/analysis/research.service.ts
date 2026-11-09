@@ -1,19 +1,12 @@
-/**
- * AI research assistant (blueprint phase 4). SampCode computes the tables (frequencies, or crosstabs by
- * a banner, with significance letters) exactly as the Analysis tab does; the model only reads them.
- * Every finding must cite a table it was read from: findings that cite nothing, or a table that was
- * not sent, are dropped and the answer says how many. Answers are never written into reports
- * automatically; the researcher reads them next to the tables they came from.
- */
-import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException } from '../http/errors';
 import { crosstab, frequency, type Crosstab, type Frequency, type Variable } from '@zapx/analysis-core';
 import { z } from 'zod';
 import type { AuthUser } from '../auth/auth.types';
-import { AiError, AiProvider, type InsightTable } from '../ai/ai-provider';
-import { AiGateway } from '../ai/ai-gateway';
+import { AiError, type AiProvider, type InsightTable } from '../ai/ai-provider';
+import { type AiGateway } from '../ai/ai-gateway';
 import { notConfigured } from '../ai/claude.provider';
 import { redactPii } from '../ai/redact';
-import { AnalysisService, filtersSchema, weightingSchema } from './analysis.service';
+import { type AnalysisService, filtersSchema, weightingSchema } from './analysis.service';
 
 /** Most tables sent in one question (keeps the prompt small and the answer focused). */
 export const MAX_ASSISTANT_TABLES = 20;
@@ -64,7 +57,6 @@ export function crosstabText(x: Crosstab, weighted: boolean): string {
   return lines.join('\n');
 }
 
-@Injectable()
 export class ResearchAssistantService {
   constructor(
     private readonly analysis: AnalysisService,

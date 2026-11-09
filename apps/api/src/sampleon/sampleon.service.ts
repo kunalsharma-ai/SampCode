@@ -1,40 +1,22 @@
-/**
- * SAMPLEON integration (SAMPLEON docs/ECOSYSTEM_ARCHITECTURE.md).
- *
- * Ownership: SAMPLEON decides who is invited, when, and where a respondent is routed next;
- * SUPPLY360 owns the respondents; SampCode hosts the survey and reports verified outcomes. SampCode
- * therefore keeps no respondent list, no invitation engine and no second quota service here, only
- * a record of each audience request so the studio can show where it stands.
- *
- *   Independent SampCode survey:  studio → POST SAMPLEON /api/v1/audience-requests (source SampCode)
- *                             → a person approves in SAMPLEON → SAMPLEON invites via SUPPLY360
- *                             → respondent enters /s/{survey}?vid=SAMPLEON&uid={token}
- *                             → outcome redirect + signed S2S to SAMPLEON (SAMPLEON vendor adapter)
- *                             → SAMPLEON events back to SampCode (POST /api/v1/sampleon/events).
- *   PROJEXA-linked survey:    PROJEXA creates the request with the launch URL shown by
- *                             GET /api/surveys/{id}/sampleon; outcomes reach SAMPLEON the same way,
- *                             and progress goes to PROJEXA.
- */
 import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
   HttpException,
-  Injectable,
   ServiceUnavailableException,
   UnauthorizedException,
-} from '@nestjs/common';
+} from '../http/errors';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Prisma } from '@zapx/db';
 import { sampledgeServiceHeaders, verifySampledgeRequest } from '@zapx/redirect-core';
 import type { AuthUser } from '../auth/auth.types';
-import { AuditService } from '../common/audit.service';
-import { PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
 import { parseBody } from '../common/validation';
 import { config } from '../config';
-import { SecretBox } from '../platform/secret-box';
-import { SurveysService } from '../surveys/surveys.service';
+import { type SecretBox } from '../platform/secret-box';
+import { type SurveysService } from '../surveys/surveys.service';
 
 /** The vendor code SAMPLEON respondents enter with. Reserved per project. */
 export const SAMPLEON_VENDOR_CODE = 'SAMPLEON';
@@ -100,7 +82,6 @@ export interface InboundRequest {
   body: unknown;
 }
 
-@Injectable()
 export class SampleonService {
   constructor(
     private readonly prisma: PrismaService,

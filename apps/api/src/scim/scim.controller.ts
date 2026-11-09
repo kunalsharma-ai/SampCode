@@ -1,13 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseFilters, UseGuards } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import type { Response } from 'express';
 import type { Role, User } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { PlanService } from '../plans/plan.service';
-import { Public } from '../auth/decorators';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PlanService } from '../plans/plan.service';
+
 import { config } from '../config';
 import { scopeFor } from '../users/users.controller';
 import { ScimGuard, type ScimRequest } from './scim.guard';
@@ -58,11 +58,6 @@ function roleOf(roles: unknown): Role | undefined {
  * and deactivate SampCode members. Groups are not supported; the role comes from the user's `roles`.
  * Deleting a user disables them (history and audit stay attached to the account).
  */
-@Public()
-@UseGuards(ScimGuard)
-@UseFilters(ScimExceptionFilter)
-@Throttle({ default: { limit: 300, ttl: 60_000 } })
-@Controller('scim/v2')
 export class ScimController {
   constructor(
     private readonly prisma: PrismaService,
@@ -106,8 +101,7 @@ export class ScimController {
 
   // ---- Discovery ------------------------------------------------------------------------------
 
-  @Get('ServiceProviderConfig')
-  config(@Res() res: Response) {
+  config(res: Response) {
     this.send(res, 200, {
       schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
       documentationUri: 'https://github.com/kunalsharma-ai/Sampledge-ZAPX/blob/main/docs/modules/sso-scim-plans.md',
@@ -123,8 +117,7 @@ export class ScimController {
     });
   }
 
-  @Get('ResourceTypes')
-  resourceTypes(@Res() res: Response) {
+  resourceTypes(res: Response) {
     this.send(res, 200, {
       schemas: [LIST_SCHEMA],
       totalResults: 1,
@@ -140,8 +133,7 @@ export class ScimController {
     });
   }
 
-  @Get('Schemas')
-  schemas(@Res() res: Response) {
+  schemas(res: Response) {
     const attr = (name: string, extra: Record<string, unknown> = {}) => ({
       name,
       type: 'string',
@@ -171,14 +163,7 @@ export class ScimController {
 
   // ---- Users ----------------------------------------------------------------------------------
 
-  @Get('Users')
-  async list(
-    @Req() req: ScimRequest,
-    @Res() res: Response,
-    @Query('filter') filter?: string,
-    @Query('startIndex') startIndexRaw?: string,
-    @Query('count') countRaw?: string,
-  ) {
+  async list(req: ScimRequest, res: Response, filter?: string, startIndexRaw?: string, countRaw?: string) {
     const tenantId = req.scimTenantId!;
     const where: Record<string, unknown> = { tenantId };
     if (filter) {
@@ -206,13 +191,11 @@ export class ScimController {
     });
   }
 
-  @Get('Users/:id')
-  async get(@Req() req: ScimRequest, @Res() res: Response, @Param('id') id: string) {
+  async get(req: ScimRequest, res: Response, id: string) {
     this.send(res, 200, this.present(await this.find(req.scimTenantId!, id)));
   }
 
-  @Post('Users')
-  async create(@Req() req: ScimRequest, @Res() res: Response, @Body() body: ScimUserInput) {
+  async create(req: ScimRequest, res: Response, body: ScimUserInput) {
     const tenantId = req.scimTenantId!;
     const email = emailOf(body ?? {});
     if (!email) throw new ScimError(400, 'userName must be an email address', 'invalidValue');
@@ -238,8 +221,7 @@ export class ScimController {
     this.send(res, 201, this.present(user));
   }
 
-  @Put('Users/:id')
-  async replace(@Req() req: ScimRequest, @Res() res: Response, @Param('id') id: string, @Body() body: ScimUserInput) {
+  async replace(req: ScimRequest, res: Response, id: string, body: ScimUserInput) {
     const before = await this.find(req.scimTenantId!, id);
     const email = emailOf(body ?? {});
     if (!email) throw new ScimError(400, 'userName must be an email address', 'invalidValue');
@@ -253,12 +235,11 @@ export class ScimController {
     this.send(res, 200, this.present(updated));
   }
 
-  @Patch('Users/:id')
   async patch(
-    @Req() req: ScimRequest,
-    @Res() res: Response,
-    @Param('id') id: string,
-    @Body() body: { schemas?: string[]; Operations?: Array<{ op?: string; path?: string; value?: unknown }> },
+    req: ScimRequest,
+    res: Response,
+    id: string,
+    body: { schemas?: string[]; Operations?: Array<{ op?: string; path?: string; value?: unknown }> },
   ) {
     const before = await this.find(req.scimTenantId!, id);
     if (!Array.isArray(body?.Operations) || (body.schemas && !body.schemas.includes(PATCH_SCHEMA))) {
@@ -296,9 +277,7 @@ export class ScimController {
   }
 
   /** Deleting a user disables them; SampCode keeps the account so audit history stays attached. */
-  @Delete('Users/:id')
-  @HttpCode(204)
-  async remove(@Req() req: ScimRequest, @Param('id') id: string) {
+  async remove(req: ScimRequest, id: string) {
     const before = await this.find(req.scimTenantId!, id);
     await this.apply(before, { active: false });
   }
@@ -334,4 +313,165 @@ export class ScimController {
     }
     return updated;
   }
+}
+
+/** Express routes of ScimController (mounted by src/http/app.ts). */
+export function scimControllerRoutes(r: Router, c: ScimController, kit: RouteKit) {
+  r.get(
+    '/api/scim/v2/ServiceProviderConfig',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'config',
+        method: 'get',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.config(res),
+    ),
+  );
+  r.get(
+    '/api/scim/v2/ResourceTypes',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'resourceTypes',
+        method: 'get',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.resourceTypes(res),
+    ),
+  );
+  r.get(
+    '/api/scim/v2/Schemas',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'schemas',
+        method: 'get',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.schemas(res),
+    ),
+  );
+  r.get(
+    '/api/scim/v2/Users',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'list',
+        method: 'get',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) =>
+        c.list(
+          req,
+          res,
+          req.query.filter as unknown as string,
+          req.query.startIndex as unknown as string,
+          req.query.count as unknown as string,
+        ),
+    ),
+  );
+  r.get(
+    '/api/scim/v2/Users/:id',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'get',
+        method: 'get',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.get(req, res, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/scim/v2/Users',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'create',
+        method: 'post',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.create(req, res, req.body as unknown as ScimUserInput),
+    ),
+  );
+  r.put(
+    '/api/scim/v2/Users/:id',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'replace',
+        method: 'put',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) => c.replace(req, res, req.params.id, req.body as unknown as ScimUserInput),
+    ),
+  );
+  r.patch(
+    '/api/scim/v2/Users/:id',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'patch',
+        method: 'patch',
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        raw: true,
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req, res) =>
+        c.patch(
+          req,
+          res,
+          req.params.id,
+          req.body as unknown as { schemas?: string[]; Operations?: Array<{ op?: string; path?: string; value?: unknown }> },
+        ),
+    ),
+  );
+  r.delete(
+    '/api/scim/v2/Users/:id',
+    ...kit.route(
+      {
+        controller: 'ScimController',
+        handler: 'remove',
+        method: 'delete',
+        status: 204,
+        public: true,
+        throttle: { limit: 300, ttl: 60_000 },
+        guards: [kit.get(ScimGuard)],
+        onError: (err, _req, res) => new ScimExceptionFilter().catch(err, res),
+      },
+      (req) => c.remove(req, req.params.id),
+    ),
+  );
 }

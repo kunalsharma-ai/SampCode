@@ -1,19 +1,14 @@
-/**
- * Blueprint phase 5: the automation engine. Rules are kept per organization; the background
- * worker runs scheduled rules when due and works the queued runs: it checks the conditions, holds
- * the actions for an administrator when the rule asks for approval, and otherwise runs them. Every
- * run is logged with the values its conditions saw and what each action did.
- */
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
 import type { AutomationRule, AutomationRun, Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { PlanService } from '../plans/plan.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type PlanService } from '../plans/plan.service';
 import type { AuthUser } from '../auth/auth.types';
 import { config } from '../config';
 import { emailProvider } from '../distribution/mailer';
-import { WebhookService } from '../integrations/webhook.service';
+import { type WebhookService } from '../integrations/webhook.service';
 import { CAUSED_BY_AUTOMATION } from './automation.queue';
 import {
   actionSchema,
@@ -66,7 +61,6 @@ function readRule(r: AutomationRule): RuleInput {
   };
 }
 
-@Injectable()
 export class AutomationService {
   private readonly log = new Logger('Automation');
 

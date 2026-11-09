@@ -1,23 +1,14 @@
-/**
- * Background work of the integration module, run in-process on a timer:
- *   1. deliver due callbacks from the outbox (retries with backoff, dead letter),
- *   2. record stale unfinished interviews as partial and queue their callbacks,
- *   3. deliver due webhook events (Milestone 6).
- *
- * Safe with several API instances: callbacks are claimed with FOR UPDATE SKIP LOCKED and a
- * lease, and the partial sweep uses a conditional update. On AWS the same runOnce() can be
- * driven by a dedicated worker task or an SQS consumer instead (docs/adr/0005-aws-deployment.md).
- */
-import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Logger } from '../http/logger';
+import type { OnApplicationBootstrap, OnModuleDestroy } from '../http/lifecycle';
 import type { OutboundCallback } from '@zapx/db';
 import { adapterFor, retryDelayMs, DEFAULT_RETRY_POLICY, type PlannedCallback } from '@zapx/redirect-core';
 import { config } from '../config';
-import { SecretBox } from '../platform/secret-box';
+import { type SecretBox } from '../platform/secret-box';
 import { toIntegrationConfig } from './integration-config';
-import { RedirectRepository } from './redirect.repository';
-import { RedirectService } from './redirect.service';
-import { HttpDelivery } from './http-delivery';
-import { WebhookService, type WebhookRun } from './webhook.service';
+import { type RedirectRepository } from './redirect.repository';
+import { type RedirectService } from './redirect.service';
+import { type HttpDelivery } from './http-delivery';
+import { type WebhookService, type WebhookRun } from './webhook.service';
 
 const LEASE_MS = 120_000;
 const BATCH = 25;
@@ -31,7 +22,6 @@ export interface WorkerRun {
   webhooks: WebhookRun;
 }
 
-@Injectable()
 export class CallbackWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger('Callbacks');
   private timer: NodeJS.Timeout | null = null;

@@ -21,17 +21,13 @@ vi.hoisted(() => {
   process.env.TELEPHONY_WEBHOOK_BASE = 'https://zapx.test/api';
 });
 
-import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { TelephonyService, TwilioProvider, twilioSignature } from '../src/cati/telephony.service';
 
@@ -40,7 +36,7 @@ const run = `m19${Date.now().toString(36)}`;
 const SID = `AC${'1'.repeat(32)}`;
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(3000, 7)]);
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let telephony: TelephonyService;
@@ -124,8 +120,7 @@ beforeAll(async () => {
     });
   });
   await new Promise<void>((r) => twilio.listen(PORT, '127.0.0.1', r));
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

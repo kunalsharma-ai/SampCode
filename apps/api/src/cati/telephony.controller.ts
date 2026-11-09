@@ -1,11 +1,12 @@
-import { Body, Controller, ForbiddenException, Get, Header, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { ForbiddenException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Public, Roles } from '../auth/decorators';
-import { TelephonyService } from './telephony.service';
+import { CAN_EDIT } from '../auth/decorators';
+import { type TelephonyService } from './telephony.service';
 
 const CALLERS = ['ADMIN', 'PROGRAMMER', 'INTERVIEWER'] as const;
 const phoneSchema = z.object({ phone: z.string().max(40).nullable() });
@@ -16,51 +17,34 @@ const dialerSchema = z.object({
 });
 
 /** The phone dialer (Milestone 19): settings, calls, and the Twilio webhooks. */
-@Controller()
 export class TelephonyController {
   constructor(private readonly telephony: TelephonyService) {}
 
-  @Get('cati/me')
-  @Roles(...CALLERS)
-  me(@CurrentUser() user: AuthUser) {
+  me(user: AuthUser) {
     return this.telephony.me(user);
   }
 
-  @Put('cati/me/phone')
-  @Roles(...CALLERS)
-  setPhone(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  setPhone(user: AuthUser, body: unknown) {
     return this.telephony.setMyPhone(user, parseBody(phoneSchema, body).phone);
   }
 
-  @Get('surveys/:id/cati/dialer')
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  dialer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  dialer(user: AuthUser, id: string) {
     return this.telephony.dialer(user, id);
   }
 
-  @Put('surveys/:id/cati/dialer')
-  @Roles(...CAN_EDIT)
-  setDialer(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  setDialer(user: AuthUser, id: string, body: unknown) {
     return this.telephony.setDialer(user, id, parseBody(dialerSchema, body));
   }
 
-  @Post('cati/cases/:id/dial')
-  @Roles(...CALLERS)
-  @HttpCode(200)
-  dial(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  dial(user: AuthUser, id: string) {
     return this.telephony.dial(user, id);
   }
 
-  @Get('cati/cases/:id/dial')
-  @Roles(...CALLERS)
-  async latest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async latest(user: AuthUser, id: string) {
     return { dial: await this.telephony.latest(user, id) };
   }
 
-  @Post('cati/dials/:id/hangup')
-  @Roles(...CALLERS)
-  @HttpCode(200)
-  hangUp(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  hangUp(user: AuthUser, id: string) {
     return this.telephony.hangUp(user, id);
   }
 
@@ -75,48 +59,130 @@ export class TelephonyController {
     return params;
   }
 
-  @Public()
-  @SkipThrottle()
-  @Post('telephony/twilio/answer')
-  @HttpCode(200)
-  @Header('Content-Type', 'text/xml')
-  answer(@Req() req: Request, @Query('d') d: string) {
+  answer(req: Request, d: string) {
     this.verified(req);
     return this.telephony.onAnswer(d);
   }
 
-  @Public()
-  @SkipThrottle()
-  @Post('telephony/twilio/notice')
-  @HttpCode(200)
-  @Header('Content-Type', 'text/xml')
-  notice(@Req() req: Request, @Query('d') d: string) {
+  notice(req: Request, d: string) {
     this.verified(req);
     return this.telephony.onNotice(d);
   }
 
-  @Public()
-  @SkipThrottle()
-  @Post('telephony/twilio/bridged')
-  @HttpCode(200)
-  @Header('Content-Type', 'text/xml')
-  bridged(@Req() req: Request, @Query('d') d: string) {
+  bridged(req: Request, d: string) {
     return this.telephony.onBridged(d, this.verified(req));
   }
 
-  @Public()
-  @SkipThrottle()
-  @Post('telephony/twilio/status')
-  @HttpCode(204)
-  status(@Req() req: Request, @Query('d') d: string) {
+  status(req: Request, d: string) {
     return this.telephony.onStatus(d, this.verified(req));
   }
 
-  @Public()
-  @SkipThrottle()
-  @Post('telephony/twilio/recording')
-  @HttpCode(204)
-  recording(@Req() req: Request, @Query('d') d: string) {
+  recording(req: Request, d: string) {
     return this.telephony.onRecording(d, this.verified(req));
   }
+}
+
+/** Express routes of TelephonyController (mounted by src/http/app.ts). */
+export function telephonyControllerRoutes(r: Router, c: TelephonyController, kit: RouteKit) {
+  r.get(
+    '/api/cati/me',
+    ...kit.route({ controller: 'TelephonyController', handler: 'me', method: 'get', roles: [...CALLERS] }, (req) =>
+      c.me(req.user as AuthUser),
+    ),
+  );
+  r.put(
+    '/api/cati/me/phone',
+    ...kit.route({ controller: 'TelephonyController', handler: 'setPhone', method: 'put', roles: [...CALLERS] }, (req) =>
+      c.setPhone(req.user as AuthUser, req.body),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/cati/dialer',
+    ...kit.route({ controller: 'TelephonyController', handler: 'dialer', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] }, (req) =>
+      c.dialer(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/surveys/:id/cati/dialer',
+    ...kit.route({ controller: 'TelephonyController', handler: 'setDialer', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.setDialer(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/cati/cases/:id/dial',
+    ...kit.route({ controller: 'TelephonyController', handler: 'dial', method: 'post', status: 200, roles: [...CALLERS] }, (req) =>
+      c.dial(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/cati/cases/:id/dial',
+    ...kit.route({ controller: 'TelephonyController', handler: 'latest', method: 'get', roles: [...CALLERS] }, (req) =>
+      c.latest(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/cati/dials/:id/hangup',
+    ...kit.route({ controller: 'TelephonyController', handler: 'hangUp', method: 'post', status: 200, roles: [...CALLERS] }, (req) =>
+      c.hangUp(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/telephony/twilio/answer',
+    ...kit.route(
+      {
+        controller: 'TelephonyController',
+        handler: 'answer',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: false,
+        headers: [['Content-Type', 'text/xml']],
+      },
+      (req) => c.answer(req, req.query.d as string),
+    ),
+  );
+  r.post(
+    '/api/telephony/twilio/notice',
+    ...kit.route(
+      {
+        controller: 'TelephonyController',
+        handler: 'notice',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: false,
+        headers: [['Content-Type', 'text/xml']],
+      },
+      (req) => c.notice(req, req.query.d as string),
+    ),
+  );
+  r.post(
+    '/api/telephony/twilio/bridged',
+    ...kit.route(
+      {
+        controller: 'TelephonyController',
+        handler: 'bridged',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: false,
+        headers: [['Content-Type', 'text/xml']],
+      },
+      (req) => c.bridged(req, req.query.d as string),
+    ),
+  );
+  r.post(
+    '/api/telephony/twilio/status',
+    ...kit.route(
+      { controller: 'TelephonyController', handler: 'status', method: 'post', status: 204, public: true, throttle: false },
+      (req) => c.status(req, req.query.d as string),
+    ),
+  );
+  r.post(
+    '/api/telephony/twilio/recording',
+    ...kit.route(
+      { controller: 'TelephonyController', handler: 'recording', method: 'post', status: 204, public: true, throttle: false },
+      (req) => c.recording(req, req.query.d as string),
+    ),
+  );
 }

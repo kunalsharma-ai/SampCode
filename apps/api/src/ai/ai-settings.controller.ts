@@ -1,11 +1,13 @@
-import { Body, Controller, ForbiddenException, Get, Put } from '@nestjs/common';
+import { ForbiddenException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { AuditService } from '../common/audit.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser } from '../auth/decorators';
-import { AI_TASKS, AiGateway } from './ai-gateway';
-import { AiUsageRepository } from './ai-usage.repository';
+
+import { AI_TASKS, type AiGateway } from './ai-gateway';
+import { type AiUsageRepository } from './ai-usage.repository';
 
 const policySchema = z.object({
   enabled: z.boolean(),
@@ -20,7 +22,6 @@ const policySchema = z.object({
 const usd = (micro: bigint | number | null | undefined) => Number(micro ?? 0) / 1_000_000;
 
 /** Organization AI settings (administrators) and the usage ledger. */
-@Controller('organization/ai')
 export class AiSettingsController {
   constructor(
     private readonly gateway: AiGateway,
@@ -32,8 +33,7 @@ export class AiSettingsController {
     if (user.role !== 'ADMIN') throw new ForbiddenException('Only administrators can see or change AI settings');
   }
 
-  @Get()
-  async get(@CurrentUser() user: AuthUser) {
+  async get(user: AuthUser) {
     AiSettingsController.admin(user);
     const [policy, status] = await Promise.all([this.gateway.policy(user.tenantId), this.gateway.status(user.tenantId)]);
     return {
@@ -43,8 +43,7 @@ export class AiSettingsController {
     };
   }
 
-  @Put()
-  async save(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async save(user: AuthUser, body: unknown) {
     AiSettingsController.admin(user);
     const input = parseBody(policySchema, body);
     const before = await this.gateway.policy(user.tenantId);
@@ -62,8 +61,7 @@ export class AiSettingsController {
   }
 
   /** This month's usage by task, model and outcome, plus the most recent calls. */
-  @Get('usage')
-  async usageSummary(@CurrentUser() user: AuthUser) {
+  async usageSummary(user: AuthUser) {
     AiSettingsController.admin(user);
     const now = new Date();
     const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -87,4 +85,22 @@ export class AiSettingsController {
       recent: recent.map((r) => ({ ...r, costMicroUsd: undefined, costUsd: usd(r.costMicroUsd) })),
     };
   }
+}
+
+/** Express routes of AiSettingsController (mounted by src/http/app.ts). */
+export function aiSettingsControllerRoutes(r: Router, c: AiSettingsController, kit: RouteKit) {
+  r.get(
+    '/api/organization/ai',
+    ...kit.route({ controller: 'AiSettingsController', handler: 'get', method: 'get' }, (req) => c.get(req.user as AuthUser)),
+  );
+  r.put(
+    '/api/organization/ai',
+    ...kit.route({ controller: 'AiSettingsController', handler: 'save', method: 'put' }, (req) => c.save(req.user as AuthUser, req.body)),
+  );
+  r.get(
+    '/api/organization/ai/usage',
+    ...kit.route({ controller: 'AiSettingsController', handler: 'usageSummary', method: 'get' }, (req) =>
+      c.usageSummary(req.user as AuthUser),
+    ),
+  );
 }

@@ -3,17 +3,15 @@
  * HTTP server. Run the API with JOB_WORKER=off and CALLBACK_WORKER=off when this process runs.
  */
 import './database-url';
-import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { logger } from './bootstrap';
 import { config } from './config';
-import { JobWorker } from './jobs/job.worker';
+import { closeOnSignals, createApp } from './http/app';
 import { CallbackWorker } from './integrations/callback.worker';
+import { JobWorker } from './jobs/job.worker';
 
 async function main() {
-  const app = await NestFactory.createApplicationContext(AppModule);
-  app.enableShutdownHooks();
+  const app = await createApp().init();
+  closeOnSignals(app, logger);
   // This process always works the queues, whatever JOB_WORKER and CALLBACK_WORKER say for the API.
   app.get(JobWorker).start();
   app.get(CallbackWorker).start();

@@ -1,23 +1,10 @@
-/**
- * Billing through Stripe (Milestone 13). Off unless BILLING=stripe; then an admin can buy or change
- * a plan with Stripe Checkout and manage payment details in the Stripe customer portal, and Stripe's
- * signed webhooks keep the organization's plan in step with its subscription.
- *
- * SampCode never sees card details. Plans and their limits stay in code (plans.ts); Stripe only says which
- * price an organization pays for (STRIPE_PRICES maps plan codes to Stripe price IDs). Every webhook is
- * checked against STRIPE_WEBHOOK_SECRET, applied once (BillingEvent), and answered by re-reading the
- * subscription from Stripe, so events that arrive late or out of order cannot set an old state.
- *
- * Status handling: active and trialing grant the paid plan; past_due keeps it while Stripe retries the
- * payment; canceled, unpaid, incomplete_expired (and a deleted subscription) fall back to
- * BILLING_FALLBACK_PLAN. Limits then apply as in docs/adr/0014: nothing already collected is lost.
- */
-import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ServiceUnavailableException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
 import { PLANS, isPlanCode, type PlanCode } from './plans';
 
@@ -57,7 +44,6 @@ export function verifyStripeSignature(raw: Buffer, header: string | undefined, s
   if (!ok) throw new StripeSignatureError('signature does not match');
 }
 
-@Injectable()
 export class BillingService {
   private readonly log = new Logger('Billing');
 

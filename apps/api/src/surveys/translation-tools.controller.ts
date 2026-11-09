@@ -1,14 +1,16 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpException, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { HttpException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
 import type { Prisma } from '@zapx/db';
 import { buildTranslationMemory, memoryMatches, translationQa, type GlossaryTerm } from '@zapx/logic-engine';
 import { LANGUAGE_TAG, parsePresentation, parseSurveyDefinition, type Presentation } from '@zapx/survey-schema';
 import { parseBody } from '../common/validation';
-import { AuditService } from '../common/audit.service';
-import { PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
-import { SurveysService } from './surveys.service';
+import { CAN_EDIT } from '../auth/decorators';
+import { type SurveysService } from './surveys.service';
 
 const termSchema = z.object({
   language: z.string().regex(LANGUAGE_TAG),
@@ -25,7 +27,6 @@ const MEMORY_VERSIONS = 400;
  * Blueprint phase 2: the organization's glossary, translation memory (reviewed translations from
  * its other surveys) and per-language QA.
  */
-@Controller()
 export class TranslationToolsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -33,8 +34,7 @@ export class TranslationToolsController {
     private readonly surveys: SurveysService,
   ) {}
 
-  @Get('glossary')
-  glossary(@CurrentUser() user: AuthUser, @Query('language') language?: string) {
+  glossary(user: AuthUser, language?: string) {
     return this.prisma.glossaryTerm.findMany({
       where: { tenantId: user.tenantId, ...(language ? { language } : {}) },
       orderBy: [{ language: 'asc' }, { source: 'asc' }],
@@ -42,9 +42,7 @@ export class TranslationToolsController {
     });
   }
 
-  @Post('glossary')
-  @Roles(...CAN_EDIT)
-  async addTerm(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async addTerm(user: AuthUser, body: unknown) {
     const t = parseBody(termSchema, body);
     const term = await this.prisma.glossaryTerm.upsert({
       where: { tenantId_language_source: { tenantId: user.tenantId, language: t.language, source: t.source } },
@@ -55,10 +53,7 @@ export class TranslationToolsController {
     return term;
   }
 
-  @Delete('glossary/:id')
-  @Roles(...CAN_EDIT)
-  @HttpCode(204)
-  async removeTerm(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async removeTerm(user: AuthUser, id: string) {
     const term = await this.prisma.glossaryTerm.findFirst({ where: { id, tenantId: user.tenantId } });
     if (!term) throw new NotFoundException('Glossary term not found');
     await this.prisma.glossaryTerm.delete({ where: { id } });
@@ -66,8 +61,7 @@ export class TranslationToolsController {
   }
 
   /** Per-language QA of the draft: blockers and reviewer warnings, with the glossary applied. */
-  @Get('surveys/:id/translation-qa')
-  async qa(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('language') language: string) {
+  async qa(user: AuthUser, id: string, language: string) {
     const { def, pres } = await this.parsedDraft(user, id);
     if (!pres.languages.some((l) => l.tag === language)) throw new NotFoundException('Add the language first.');
     const glossary = await this.termsFor(user, language);
@@ -84,9 +78,7 @@ export class TranslationToolsController {
    * Fill missing or outdated texts with translations a person already approved for the same source
    * text in this organization's surveys. Reused texts keep their approved status.
    */
-  @Post('surveys/:id/translation-memory')
-  @Roles(...CAN_EDIT)
-  async applyMemory(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async applyMemory(user: AuthUser, id: string, body: unknown) {
     const { language } = parseBody(languageBody, body);
     const draft = await this.surveys.draft(user, id);
     const { def, pres } = this.parse(draft.definition, draft.presentation);
@@ -152,4 +144,39 @@ export class TranslationToolsController {
     if (!def.ok || !pres.ok) throw new HttpException('Fix the draft first.', 422);
     return { def: def.definition, pres: pres.presentation };
   }
+}
+
+/** Express routes of TranslationToolsController (mounted by src/http/app.ts). */
+export function translationToolsControllerRoutes(r: Router, c: TranslationToolsController, kit: RouteKit) {
+  r.get(
+    '/api/glossary',
+    ...kit.route({ controller: 'TranslationToolsController', handler: 'glossary', method: 'get' }, (req) =>
+      c.glossary(req.user as AuthUser, req.query.language as string),
+    ),
+  );
+  r.post(
+    '/api/glossary',
+    ...kit.route({ controller: 'TranslationToolsController', handler: 'addTerm', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.addTerm(req.user as AuthUser, req.body),
+    ),
+  );
+  r.delete(
+    '/api/glossary/:id',
+    ...kit.route(
+      { controller: 'TranslationToolsController', handler: 'removeTerm', method: 'delete', status: 204, roles: [...CAN_EDIT] },
+      (req) => c.removeTerm(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/translation-qa',
+    ...kit.route({ controller: 'TranslationToolsController', handler: 'qa', method: 'get' }, (req) =>
+      c.qa(req.user as AuthUser, req.params.id, req.query.language as string),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/translation-memory',
+    ...kit.route({ controller: 'TranslationToolsController', handler: 'applyMemory', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.applyMemory(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
 }

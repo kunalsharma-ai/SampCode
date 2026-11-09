@@ -1,30 +1,18 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Param,
-  Post,
-  Req,
-  Res,
-  UploadedFile as UploadedFileParam,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { BadRequestException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Public, Roles } from '../auth/decorators';
+
 import type { UploadedFile } from '../imports/documents';
 import { parseBody } from '../common/validation';
 import { isFirstRead, sendBytes } from '../common/send-bytes';
 import { config } from '../config';
-import { InterviewService } from '../interview/interview.service';
-import { CaptureService, PHOTO_MAX_MB } from './capture.service';
-import { JobsService, presentJob } from '../jobs/jobs.service';
-import { TranscriptionService } from './transcription.service';
+import { type InterviewService } from '../interview/interview.service';
+import { type CaptureService, PHOTO_MAX_MB } from './capture.service';
+import { type JobsService, presentJob } from '../jobs/jobs.service';
+import { type TranscriptionService } from './transcription.service';
 
 const maxBytes = () => Math.max(PHOTO_MAX_MB, config().CAPTURE_MAX_MB) * 1024 * 1024;
 
@@ -43,7 +31,6 @@ const transcribeSchema = z.object({
     .optional(),
 });
 
-@Controller()
 export class CaptureController {
   constructor(
     private readonly captures: CaptureService,
@@ -53,32 +40,20 @@ export class CaptureController {
   ) {}
 
   /** A respondent's photo answer. Access is by the interview's session token, like every respondent call. */
-  @Public()
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @Post('public/r/:token/captures')
-  @HttpCode(200)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: PHOTO_MAX_MB * 1024 * 1024, files: 1, fields: 3 } }))
-  respondentPhoto(@Param('token') token: string, @Body() body: { questionId?: unknown }, @UploadedFileParam() file?: UploadedFile) {
+  respondentPhoto(token: string, body: { questionId?: unknown }, file?: UploadedFile) {
     if (!file) throw new BadRequestException('Attach a photo');
     if (typeof body?.questionId !== 'string') throw new BadRequestException('questionId is required');
     return this.interview.uploadPhoto(token, body.questionId, file.buffer);
   }
 
   /** The interviewer app uploads photos and recordings before the interview itself syncs. */
-  @Roles('INTERVIEWER')
-  @Throttle({ default: { limit: 120, ttl: 60_000 } })
-  @Post('capi/captures')
-  @HttpCode(200)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: maxBytes(), files: 1, fields: 6 } }))
-  device(@CurrentUser() user: AuthUser, @Body() body: unknown, @UploadedFileParam() file?: UploadedFile) {
+  device(user: AuthUser, body: unknown, file?: UploadedFile) {
     if (!file) throw new BadRequestException('Attach the file');
     return this.captures.uploadFromDevice(user, parseBody(deviceUploadSchema, body), file.buffer);
   }
 
   /** Open a photo or recording. Private: never cached by shared caches, never embedded by other sites. */
-  @SkipThrottle()
-  @Get('captures/:id')
-  async open(@CurrentUser() user: AuthUser, @Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async open(user: AuthUser, id: string, req: Request, res: Response) {
     const { meta, data } = await this.captures.open(user, id, isFirstRead(req));
     res.setHeader('Content-Type', meta.contentType);
     res.setHeader('Cache-Control', 'private, max-age=300');
@@ -88,8 +63,7 @@ export class CaptureController {
     sendBytes(req, res, data);
   }
 
-  @Get('surveys/:id/captures')
-  summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  summary(user: AuthUser, id: string) {
     return this.captures.countOf(user, id);
   }
 
@@ -97,10 +71,7 @@ export class CaptureController {
    * Transcribe recordings in the background (Milestone 17): the ones named, or every recording of
    * the survey that has no transcript yet. Each recording is sent to the transcription provider.
    */
-  @Roles('ADMIN', 'PROGRAMMER')
-  @Post('surveys/:id/captures/transcribe')
-  @HttpCode(202)
-  async transcribe(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async transcribe(user: AuthUser, id: string, body: unknown) {
     if (!this.transcription.current()) throw new BadRequestException('Transcription is not turned on for this installation.');
     const input = parseBody(transcribeSchema, body ?? {});
     const job = await this.jobs.enqueue(user, 'transcribe', id, input.captureIds?.length ? { captureIds: input.captureIds } : {});
@@ -108,10 +79,66 @@ export class CaptureController {
   }
 
   /** Erase every photo and recording of the survey. Cannot be undone. */
-  @Roles('ADMIN')
-  @Post('surveys/:id/captures/erase')
-  @HttpCode(200)
-  erase(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  erase(user: AuthUser, id: string) {
     return this.captures.eraseSurvey(user, id);
   }
+}
+
+/** Express routes of CaptureController (mounted by src/http/app.ts). */
+export function captureControllerRoutes(r: Router, c: CaptureController, kit: RouteKit) {
+  r.post(
+    '/api/public/r/:token/captures',
+    ...kit.route(
+      {
+        controller: 'CaptureController',
+        handler: 'respondentPhoto',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: 20, ttl: 60_000 },
+        upload: { field: 'file', ...{ limits: { fileSize: PHOTO_MAX_MB * 1024 * 1024, files: 1, fields: 3 } } },
+      },
+      (req) => c.respondentPhoto(req.params.token, req.body as unknown as { questionId?: unknown }, req.file as unknown as UploadedFile),
+    ),
+  );
+  r.post(
+    '/api/capi/captures',
+    ...kit.route(
+      {
+        controller: 'CaptureController',
+        handler: 'device',
+        method: 'post',
+        status: 200,
+        roles: ['INTERVIEWER'],
+        throttle: { limit: 120, ttl: 60_000 },
+        upload: { field: 'file', ...{ limits: { fileSize: maxBytes(), files: 1, fields: 6 } } },
+      },
+      (req) => c.device(req.user as AuthUser, req.body, req.file as unknown as UploadedFile),
+    ),
+  );
+  r.get(
+    '/api/captures/:id',
+    ...kit.route({ controller: 'CaptureController', handler: 'open', method: 'get', throttle: false, raw: true }, (req, res) =>
+      c.open(req.user as AuthUser, req.params.id, req, res),
+    ),
+  );
+  r.get(
+    '/api/surveys/:id/captures',
+    ...kit.route({ controller: 'CaptureController', handler: 'summary', method: 'get' }, (req) =>
+      c.summary(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/captures/transcribe',
+    ...kit.route(
+      { controller: 'CaptureController', handler: 'transcribe', method: 'post', status: 202, roles: ['ADMIN', 'PROGRAMMER'] },
+      (req) => c.transcribe(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/surveys/:id/captures/erase',
+    ...kit.route({ controller: 'CaptureController', handler: 'erase', method: 'post', status: 200, roles: ['ADMIN'] }, (req) =>
+      c.erase(req.user as AuthUser, req.params.id),
+    ),
+  );
 }

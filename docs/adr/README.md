@@ -45,5 +45,6 @@ they are accepted; a later record supersedes an earlier one.
 | [0038](0038-rename-to-sampcode.md)               | ZAPX renamed SampCode: user-facing name and artwork, identifiers kept      | Accepted                                               |
 | [0039](0039-sampbidx-sampaudience-names.md)      | Bidzo renamed SampBidx and SAMPLEON renamed SampAudience in user text      | Accepted                                               |
 | [0040](0040-mongodb.md)                          | MongoDB in place of PostgreSQL                                             | Accepted                                               |
+| [0041](0041-express.md)                          | Plain Express replaces NestJS: route functions, one composition root       | Accepted                                               |
 
 Template: copy an existing record; sections are Context, Decision, Consequences.

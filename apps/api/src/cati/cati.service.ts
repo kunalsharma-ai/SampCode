@@ -1,10 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '../http/errors';
 import type { CatiCase, Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { SecretBox } from '../platform/secret-box';
-import { InterviewService } from '../interview/interview.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type SecretBox } from '../platform/secret-box';
+import { type InterviewService } from '../interview/interview.service';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
 import type { AuthUser } from '../auth/auth.types';
@@ -54,7 +54,6 @@ export const DEFAULT_HOURS: CallingHours = { timeZone: 'UTC', callFrom: 9 * 60, 
  * (callbacks first), interview through the same runtime and engine, and record a disposition per
  * call. Retries, callbacks and maximum attempts decide when a case comes back.
  */
-@Injectable()
 export class CatiService {
   constructor(
     private readonly prisma: PrismaService,

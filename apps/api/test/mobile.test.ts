@@ -13,25 +13,20 @@ vi.hoisted(() => {
   process.env.MOBILE_MIN_VERSION = '1.0.0';
 });
 
-import 'reflect-metadata';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { resetConfig } from '../src/config';
 
 const run = `mob${Date.now().toString(36)}`;
 const password = 'correct-horse-battery';
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let token: string;
 
 beforeAll(async () => {
   resetConfig();
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   const reg = await http

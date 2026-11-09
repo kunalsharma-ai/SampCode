@@ -1,13 +1,4 @@
-/**
- * Where file bytes live (Milestone 7, S3 in Milestone 13). The database keeps only metadata.
- *
- * FILE_STORE=local (the default) writes under FILES_DIR: one host, or several sharing a volume.
- * FILE_STORE=s3 keeps every file as an object in a private bucket, encrypted at rest with SSE-KMS
- * when S3_KMS_KEY_ID is set and SSE-S3 (AES-256) otherwise. Credentials come from the standard AWS
- * chain (the ECS task role on AWS; environment or profile elsewhere), never from SampCode settings.
- * S3_ENDPOINT points the store at an S3-compatible service (MinIO, LocalStack) for testing.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client, type ServerSideEncryption } from '@aws-sdk/client-s3';
@@ -26,7 +17,6 @@ export function checkKey(key: string) {
   return key;
 }
 
-@Injectable()
 export class LocalFileStore extends FileStore {
   private readonly root = resolve(config().FILES_DIR);
 
@@ -78,7 +68,6 @@ export function s3Settings(): S3Settings {
   };
 }
 
-@Injectable()
 export class S3FileStore extends FileStore {
   private readonly log = new Logger('S3FileStore');
   private readonly bucket: string;
@@ -147,7 +136,6 @@ export function fileStoreFromConfig(): FileStore {
  * The FileStore the API and the worker use: follows Settings > Integrations, rebuilding the S3 client
  * when the bucket, keys or switch change. Files are not moved when storage is switched.
  */
-@Injectable()
 export class SwitchingFileStore extends FileStore {
   private built?: { fingerprint: string; store: FileStore };
 

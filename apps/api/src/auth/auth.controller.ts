@@ -1,35 +1,23 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  HttpException,
-  HttpStatus,
-  Post,
-  Req,
-  Res,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { Throttle } from '@nestjs/throttler';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, UnauthorizedException } from '../http/errors';
+import { type JwtService } from '../http/jwt';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { compare, hash, hashSync } from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
 import { AUTH_COOKIE, type AuthUser } from './auth.types';
 import { bodyToken, issueSession, sessionCookieOptions } from './session';
 import { verifySession } from './auth.guard';
 import { isCommonPassword } from './password-policy';
-import { SsoService } from './sso.service';
-import { PasswordResetService, newPasswordSchema } from './password-reset.service';
-import { EntitlementsService } from '../super-admin/entitlements.service';
-import { IntegrationSettingsService } from '../platform/integration-settings.service';
-import { ALL_ROLES, CurrentUser, Public, Roles } from './decorators';
+import { type SsoService } from './sso.service';
+import { type PasswordResetService, newPasswordSchema } from './password-reset.service';
+import { type EntitlementsService } from '../super-admin/entitlements.service';
+import { type IntegrationSettingsService } from '../platform/integration-settings.service';
+import { ALL_ROLES } from './decorators';
 
 const loginSchema = z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1).max(200) });
 const registerSchema = z.object({
@@ -50,7 +38,6 @@ const resetSchema = z.object({ token: z.string().min(20).max(200), password: new
 /** Used when the email is unknown so that response timing does not reveal which accounts exist. */
 const DUMMY_HASH = hashSync('zapx-timing-equalizer', 10);
 
-@Controller('auth')
 export class AuthController {
   constructor(
     private readonly prisma: PrismaService,
@@ -66,11 +53,7 @@ export class AuthController {
     return issueSession(this.jwt, res, user);
   }
 
-  @Public()
-  @Throttle({ default: { limit: () => config().LOGIN_RATE_PER_MINUTE, ttl: 60_000 } })
-  @Post('login')
-  @HttpCode(200)
-  async login(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async login(body: unknown, req: Request, res: Response) {
     const { email, password } = parseBody(loginSchema, body);
     const user = await this.prisma.user.findUnique({ where: { email } });
     // Compare against a dummy hash when the user does not exist to keep timing uniform.
@@ -112,10 +95,7 @@ export class AuthController {
   }
 
   /** Self-service sign-up creating a new tenant. Disabled unless ALLOW_SIGNUP=true. */
-  @Public()
-  @Throttle({ default: { limit: () => config().SIGNUP_RATE_PER_MINUTE, ttl: 60_000 } })
-  @Post('register')
-  async register(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async register(body: unknown, req: Request, res: Response) {
     if (!config().ALLOW_SIGNUP) throw new ForbiddenException('Sign-up is disabled');
     const input = parseBody(registerSchema, body);
     if (await this.prisma.user.findUnique({ where: { email: input.email } }))
@@ -153,10 +133,7 @@ export class AuthController {
   }
 
   /** Signs this session out on the server too, so a copied token stops working (Milestone 20). */
-  @Public()
-  @Post('logout')
-  @HttpCode(204)
-  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async logout(req: Request, res: Response) {
     const header = req.headers.authorization;
     const bearer = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
     const token = bearer ?? (req.cookies as Record<string, string> | undefined)?.[AUTH_COOKIE];
@@ -172,10 +149,7 @@ export class AuthController {
   }
 
   /** Ends every session of the signed-in member on every device (API keys are managed separately). */
-  @Post('logout-all')
-  @Roles(...ALL_ROLES)
-  @HttpCode(204)
-  async logoutAll(@CurrentUser() user: AuthUser, @Res({ passthrough: true }) res: Response) {
+  async logoutAll(user: AuthUser, res: Response) {
     if (user.apiKeyId) throw new ForbiddenException('Sign out everywhere needs a signed-in session, not an API key');
     await this.prisma.user.update({ where: { id: user.id }, data: { sessionsRevokedAt: new Date() } });
     res.clearCookie(AUTH_COOKIE, sessionCookieOptions());
@@ -186,16 +160,7 @@ export class AuthController {
    * Change my own password. Needs the current one; signs out my other sessions and keeps this one
    * (a new session cookie is set). Not for API keys or members who must use single sign-on.
    */
-  @Post('change-password')
-  @Roles(...ALL_ROLES)
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @HttpCode(200)
-  async changePassword(
-    @CurrentUser() user: AuthUser,
-    @Body() body: unknown,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async changePassword(user: AuthUser, body: unknown, req: Request, res: Response) {
     if (user.apiKeyId) throw new ForbiddenException('Changing a password needs a signed-in session, not an API key');
     const input = parseBody(changePasswordSchema, body);
     const member = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -224,11 +189,7 @@ export class AuthController {
    * Forgot password: emails a one-time link when email is set up (EMAIL_PROVIDER). Always answers
    * 204, whether or not the account exists, so the form cannot be used to find accounts.
    */
-  @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @Post('forgot-password')
-  @HttpCode(204)
-  async forgot(@Body() body: unknown) {
+  async forgot(body: unknown) {
     const { email } = parseBody(forgotSchema, body);
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || user.disabledAt) return;
@@ -240,26 +201,18 @@ export class AuthController {
   }
 
   /** Whether "forgot password" can send email, so the sign-in page can say what will happen. */
-  @Public()
-  @Get('password-options')
   passwordOptions() {
     return { forgotPasswordEmail: config().EMAIL_PROVIDER !== 'off' };
   }
 
   /** Sets a new password from a reset link. Signs out every session; the member then signs in. */
-  @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @Post('reset-password')
-  @HttpCode(204)
-  async reset(@Body() body: unknown) {
+  async reset(body: unknown) {
     const input = parseBody(resetSchema, body);
     const user = await this.resets.consume(input.token, input.password);
     await this.audit.record({ tenantId: user.tenantId, id: user.id }, 'auth.password_reset', 'user', user.id);
   }
 
-  @Get('me')
-  @Roles(...ALL_ROLES)
-  async me(@CurrentUser() user: AuthUser) {
+  async me(user: AuthUser) {
     const u = await this.prisma.user.findUniqueOrThrow({
       where: { id: user.id },
       select: {
@@ -289,4 +242,85 @@ export class AuthController {
       entitlements: await this.entitlements.forUser(user.id, user.client ?? 'web'),
     };
   }
+}
+
+/** Express routes of AuthController (mounted by src/http/app.ts). */
+export function authControllerRoutes(r: Router, c: AuthController, kit: RouteKit) {
+  r.post(
+    '/api/auth/login',
+    ...kit.route(
+      {
+        controller: 'AuthController',
+        handler: 'login',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: () => config().LOGIN_RATE_PER_MINUTE, ttl: 60_000 },
+      },
+      (req, res) => c.login(req.body, req, res),
+    ),
+  );
+  r.post(
+    '/api/auth/register',
+    ...kit.route(
+      {
+        controller: 'AuthController',
+        handler: 'register',
+        method: 'post',
+        public: true,
+        throttle: { limit: () => config().SIGNUP_RATE_PER_MINUTE, ttl: 60_000 },
+      },
+      (req, res) => c.register(req.body, req, res),
+    ),
+  );
+  r.post(
+    '/api/auth/logout',
+    ...kit.route({ controller: 'AuthController', handler: 'logout', method: 'post', status: 204, public: true }, (req, res) =>
+      c.logout(req, res),
+    ),
+  );
+  r.post(
+    '/api/auth/logout-all',
+    ...kit.route({ controller: 'AuthController', handler: 'logoutAll', method: 'post', status: 204, roles: [...ALL_ROLES] }, (req, res) =>
+      c.logoutAll(req.user as AuthUser, res),
+    ),
+  );
+  r.post(
+    '/api/auth/change-password',
+    ...kit.route(
+      {
+        controller: 'AuthController',
+        handler: 'changePassword',
+        method: 'post',
+        status: 200,
+        roles: [...ALL_ROLES],
+        throttle: { limit: 10, ttl: 60_000 },
+      },
+      (req, res) => c.changePassword(req.user as AuthUser, req.body, req, res),
+    ),
+  );
+  r.post(
+    '/api/auth/forgot-password',
+    ...kit.route(
+      { controller: 'AuthController', handler: 'forgot', method: 'post', status: 204, public: true, throttle: { limit: 5, ttl: 60_000 } },
+      (req) => c.forgot(req.body),
+    ),
+  );
+  r.get(
+    '/api/auth/password-options',
+    ...kit.route({ controller: 'AuthController', handler: 'passwordOptions', method: 'get', public: true }, () => c.passwordOptions()),
+  );
+  r.post(
+    '/api/auth/reset-password',
+    ...kit.route(
+      { controller: 'AuthController', handler: 'reset', method: 'post', status: 204, public: true, throttle: { limit: 10, ttl: 60_000 } },
+      (req) => c.reset(req.body),
+    ),
+  );
+  r.get(
+    '/api/auth/me',
+    ...kit.route({ controller: 'AuthController', handler: 'me', method: 'get', roles: [...ALL_ROLES] }, (req) =>
+      c.me(req.user as AuthUser),
+    ),
+  );
 }

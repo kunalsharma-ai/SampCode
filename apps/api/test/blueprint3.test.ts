@@ -12,20 +12,16 @@ vi.hoisted(() => {
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { DistributionService } from '../src/distribution/distribution.service';
 import type { EmailProvider, OutgoingEmail } from '../src/distribution/mailer';
 
 const run = `bp3${Date.now().toString(36)}`;
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let admin: Record<string, string>;
@@ -48,8 +44,7 @@ async function publish(name: string, definition: unknown) {
 }
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

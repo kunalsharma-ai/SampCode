@@ -1,16 +1,10 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  type OnModuleDestroy,
-  type OnModuleInit,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '../http/errors';
+import { Logger } from '../http/logger';
+import type { OnModuleDestroy, OnModuleInit } from '../http/lifecycle';
 import type { Prisma } from '@zapx/db';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
 import { LocalSecretBox, type SecretBox } from './secret-box';
 import { checkIntegration } from './integration-checks';
@@ -38,7 +32,6 @@ export interface SaveInput {
  * Keeps every process's copy of the CRM integrations fresh, and lets the platform operator's
  * administrators read, change and test them. See ./integrations.ts.
  */
-@Injectable()
 export class IntegrationSettingsService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Integrations');
   private readonly box: SecretBox = new LocalSecretBox();

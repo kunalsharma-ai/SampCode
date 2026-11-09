@@ -1,12 +1,12 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Request, Response } from 'express';
 import { parseBody } from '../common/validation';
-import { ALL_ROLES, CurrentUser, Roles } from '../auth/decorators';
+import { ALL_ROLES } from '../auth/decorators';
 import { CLIENT_HEADER, type AuthUser } from '../auth/auth.types';
-import { SuperAdminService } from './super-admin.service';
-import { EntitlementsService } from './entitlements.service';
-import { PlatformAutomationService } from './platform-automation.service';
+import { type SuperAdminService } from './super-admin.service';
+import { type EntitlementsService } from './entitlements.service';
+import { type PlatformAutomationService } from './platform-automation.service';
 import { FEATURES, isSurface, type Surface } from './features';
 import { ACTION_LABELS, TEMPLATES, TRIGGERS, automationSchema } from './platform-automation';
 import {
@@ -32,27 +32,16 @@ const surfaceOf = (q: unknown, header: unknown): Surface => (isSurface(q) ? q : 
  * What every signed-in member can ask about their own features (the web CRM and the mobile app use
  * these to show or hide screens). Reachable even when the organization is suspended.
  */
-@Controller()
 export class EntitlementsController {
   constructor(private readonly entitlements: EntitlementsService) {}
 
   /** The feature catalog: every key with its label, group and the surfaces it exists on. */
-  @Get('features')
-  @Roles(...ALL_ROLES)
   features() {
     return FEATURES.map(({ key, label, group, description, surfaces }) => ({ key, label, group, description, surfaces }));
   }
 
   /** The member's features for ?surface=web|mobile (default: the X-ZAPX-Client header, else web). ETag = version. */
-  @Get('me/entitlements')
-  @Roles(...ALL_ROLES)
-  async mine(
-    @CurrentUser() user: AuthUser,
-    @Query('surface') surface: unknown,
-    @Headers(CLIENT_HEADER) client: unknown,
-    @Headers('if-none-match') ifNoneMatch: string | undefined,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async mine(user: AuthUser, surface: unknown, client: unknown, ifNoneMatch: string | undefined, res: Response) {
     const ent = await this.entitlements.forUser(user.id, surfaceOf(surface, client));
     const etag = `"${ent.version}"`;
     res.setHeader('ETag', etag);
@@ -65,16 +54,7 @@ export class EntitlementsController {
   }
 
   /** Server-sent events: "entitlements" with the same body as GET me/entitlements, whenever it changes. */
-  @Get('me/entitlements/stream')
-  @Roles(...ALL_ROLES)
-  @SkipThrottle()
-  async stream(
-    @CurrentUser() user: AuthUser,
-    @Query('surface') surface: unknown,
-    @Headers(CLIENT_HEADER) client: unknown,
-    @Req() req: Request,
-    @Res() res: Response,
-  ) {
+  async stream(user: AuthUser, surface: unknown, client: unknown, req: Request, res: Response) {
     const s = surfaceOf(surface, client);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -113,117 +93,93 @@ export class EntitlementsController {
  * The super admin console's API. The auth guard lets only a signed-in super admin (never an API key)
  * reach any route of this controller.
  */
-@Controller('super')
 export class SuperAdminController {
   constructor(
     private readonly svc: SuperAdminService,
     private readonly automation: PlatformAutomationService,
   ) {}
 
-  @Get('overview')
   overview() {
     return this.svc.overview();
   }
 
   // Plans
-  @Get('plans')
   plans() {
     return this.svc.listPlans();
   }
 
-  @Post('plans')
-  createPlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  createPlan(user: AuthUser, body: unknown) {
     return this.svc.createPlan(user, parseBody(newPlanSchema, body));
   }
 
-  @Put('plans/:code')
-  updatePlan(@CurrentUser() user: AuthUser, @Param('code') code: string, @Body() body: unknown) {
+  updatePlan(user: AuthUser, code: string, body: unknown) {
     return this.svc.updatePlan(user, code, parseBody(planSchema, body));
   }
 
-  @Delete('plans/:code')
-  @HttpCode(204)
-  deletePlan(@CurrentUser() user: AuthUser, @Param('code') code: string) {
+  deletePlan(user: AuthUser, code: string) {
     return this.svc.deletePlan(user, code);
   }
 
   // Organizations
-  @Get('organizations')
-  organizations(@Query('q') q?: string, @Query('status') status?: string) {
+  organizations(q?: string, status?: string) {
     return this.svc.listOrganizations(q?.slice(0, 120), status?.slice(0, 20));
   }
 
-  @Post('organizations')
-  createOrganization(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  createOrganization(user: AuthUser, body: unknown) {
     return this.svc.createOrganization(user, parseBody(createOrgSchema, body));
   }
 
-  @Get('organizations/:id')
-  organization(@Param('id') id: string) {
+  organization(id: string) {
     return this.svc.organization(id);
   }
 
-  @Patch('organizations/:id')
-  updateOrganization(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  updateOrganization(user: AuthUser, id: string, body: unknown) {
     return this.svc.updateOrganization(user, id, parseBody(orgPatchSchema, body));
   }
 
-  @Put('organizations/:id/features')
-  setFeatures(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  setFeatures(user: AuthUser, id: string, body: unknown) {
     return this.svc.setOrganizationFeatures(user, id, parseBody(overridesSchema, body));
   }
 
-  @Patch('organizations/:id/features')
-  setFeature(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  setFeature(user: AuthUser, id: string, body: unknown) {
     return this.svc.setOrganizationFeature(user, id, parseBody(featureChangeSchema, body));
   }
 
-  @Post('organizations/:id/suspend')
-  @HttpCode(204)
-  suspend(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  suspend(user: AuthUser, id: string, body: unknown) {
     return this.svc.suspend(user, id, parseBody(suspendSchema, body ?? {}).reason);
   }
 
-  @Post('organizations/:id/reactivate')
-  @HttpCode(204)
-  reactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  reactivate(user: AuthUser, id: string) {
     return this.svc.reactivate(user, id);
   }
 
-  @Post('organizations/:id/members')
-  createMember(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  createMember(user: AuthUser, id: string, body: unknown) {
     return this.svc.createUser(user, id, parseBody(createUserSchema, body));
   }
 
   // Members
-  @Get('users')
-  users(@Query('q') q?: string, @Query('tenantId') tenantId?: string) {
+  users(q?: string, tenantId?: string) {
     return this.svc.listUsers(q?.slice(0, 120), tenantId?.slice(0, 64));
   }
 
-  @Patch('users/:id')
-  updateUser(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  updateUser(user: AuthUser, id: string, body: unknown) {
     return this.svc.updateUser(user, id, parseBody(userPatchSchema, body));
   }
 
-  @Post('users/:id/password-reset')
-  resetLink(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  resetLink(user: AuthUser, id: string) {
     return this.svc.userResetLink(user, id);
   }
 
   // Activity and integrations
-  @Get('activity')
-  activity(@Query() query: unknown) {
+  activity(query: unknown) {
     return this.svc.activity(parseBody(activitySchema, query));
   }
 
-  @Get('integrations')
-  integrations(@CurrentUser() user: AuthUser) {
+  integrations(user: AuthUser) {
     return this.svc.integrationsOverview(user);
   }
 
   // Automation
-  @Get('automation/vocabulary')
   vocabulary() {
     return {
       triggers: Object.entries(TRIGGERS).map(([key, t]) => ({ key, ...t })),
@@ -232,41 +188,206 @@ export class SuperAdminController {
     };
   }
 
-  @Get('automation/rules')
   rules() {
     return this.automation.list();
   }
 
-  @Post('automation/rules')
-  createRule(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  createRule(user: AuthUser, body: unknown) {
     return this.automation.create(user, parseBody(automationSchema, body));
   }
 
-  @Patch('automation/rules/:id')
-  updateRule(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  updateRule(user: AuthUser, id: string, body: unknown) {
     return this.automation.update(user, id, parseBody(automationSchema.partial(), body));
   }
 
-  @Delete('automation/rules/:id')
-  @HttpCode(204)
-  deleteRule(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  deleteRule(user: AuthUser, id: string) {
     return this.automation.remove(user, id);
   }
 
-  @Get('automation/rules/:id/preview')
-  preview(@Param('id') id: string) {
+  preview(id: string) {
     return this.automation.preview(id);
   }
 
   /** Run every enabled rule (or one, with ?rule=) now instead of waiting for the schedule. */
-  @Post('automation/run')
-  @HttpCode(200)
-  async runNow(@Query('rule') rule?: string) {
+  async runNow(rule?: string) {
     return { fired: await this.automation.sweep(rule?.slice(0, 64)) };
   }
 
-  @Get('automation/runs')
-  runs(@Query('rule') rule?: string) {
+  runs(rule?: string) {
     return this.automation.runs(rule?.slice(0, 64));
   }
+}
+
+/** Express routes of EntitlementsController (mounted by src/http/app.ts). */
+export function entitlementsControllerRoutes(r: Router, c: EntitlementsController, kit: RouteKit) {
+  r.get(
+    '/api/features',
+    ...kit.route({ controller: 'EntitlementsController', handler: 'features', method: 'get', roles: [...ALL_ROLES] }, () => c.features()),
+  );
+  r.get(
+    '/api/me/entitlements',
+    ...kit.route({ controller: 'EntitlementsController', handler: 'mine', method: 'get', roles: [...ALL_ROLES] }, (req, res) =>
+      c.mine(
+        req.user as AuthUser,
+        req.query.surface,
+        req.headers[CLIENT_HEADER.toLowerCase()],
+        req.headers['if-none-match'] as unknown as string | undefined,
+        res,
+      ),
+    ),
+  );
+  r.get(
+    '/api/me/entitlements/stream',
+    ...kit.route(
+      { controller: 'EntitlementsController', handler: 'stream', method: 'get', roles: [...ALL_ROLES], throttle: false, raw: true },
+      (req, res) => c.stream(req.user as AuthUser, req.query.surface, req.headers[CLIENT_HEADER.toLowerCase()], req, res),
+    ),
+  );
+}
+
+/** Express routes of SuperAdminController (mounted by src/http/app.ts). */
+export function superAdminControllerRoutes(r: Router, c: SuperAdminController, kit: RouteKit) {
+  r.get(
+    '/api/super/overview',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'overview', method: 'get' }, () => c.overview()),
+  );
+  r.get('/api/super/plans', ...kit.route({ controller: 'SuperAdminController', handler: 'plans', method: 'get' }, () => c.plans()));
+  r.post(
+    '/api/super/plans',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'createPlan', method: 'post' }, (req) =>
+      c.createPlan(req.user as AuthUser, req.body),
+    ),
+  );
+  r.put(
+    '/api/super/plans/:code',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'updatePlan', method: 'put' }, (req) =>
+      c.updatePlan(req.user as AuthUser, req.params.code, req.body),
+    ),
+  );
+  r.delete(
+    '/api/super/plans/:code',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'deletePlan', method: 'delete', status: 204 }, (req) =>
+      c.deletePlan(req.user as AuthUser, req.params.code),
+    ),
+  );
+  r.get(
+    '/api/super/organizations',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'organizations', method: 'get' }, (req) =>
+      c.organizations(req.query.q as string, req.query.status as string),
+    ),
+  );
+  r.post(
+    '/api/super/organizations',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'createOrganization', method: 'post' }, (req) =>
+      c.createOrganization(req.user as AuthUser, req.body),
+    ),
+  );
+  r.get(
+    '/api/super/organizations/:id',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'organization', method: 'get' }, (req) => c.organization(req.params.id)),
+  );
+  r.patch(
+    '/api/super/organizations/:id',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'updateOrganization', method: 'patch' }, (req) =>
+      c.updateOrganization(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.put(
+    '/api/super/organizations/:id/features',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'setFeatures', method: 'put' }, (req) =>
+      c.setFeatures(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.patch(
+    '/api/super/organizations/:id/features',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'setFeature', method: 'patch' }, (req) =>
+      c.setFeature(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/super/organizations/:id/suspend',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'suspend', method: 'post', status: 204 }, (req) =>
+      c.suspend(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/super/organizations/:id/reactivate',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'reactivate', method: 'post', status: 204 }, (req) =>
+      c.reactivate(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/super/organizations/:id/members',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'createMember', method: 'post' }, (req) =>
+      c.createMember(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/super/users',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'users', method: 'get' }, (req) =>
+      c.users(req.query.q as string, req.query.tenantId as string),
+    ),
+  );
+  r.patch(
+    '/api/super/users/:id',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'updateUser', method: 'patch' }, (req) =>
+      c.updateUser(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/super/users/:id/password-reset',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'resetLink', method: 'post' }, (req) =>
+      c.resetLink(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/super/activity',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'activity', method: 'get' }, (req) => c.activity(req.query)),
+  );
+  r.get(
+    '/api/super/integrations',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'integrations', method: 'get' }, (req) =>
+      c.integrations(req.user as AuthUser),
+    ),
+  );
+  r.get(
+    '/api/super/automation/vocabulary',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'vocabulary', method: 'get' }, () => c.vocabulary()),
+  );
+  r.get(
+    '/api/super/automation/rules',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'rules', method: 'get' }, () => c.rules()),
+  );
+  r.post(
+    '/api/super/automation/rules',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'createRule', method: 'post' }, (req) =>
+      c.createRule(req.user as AuthUser, req.body),
+    ),
+  );
+  r.patch(
+    '/api/super/automation/rules/:id',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'updateRule', method: 'patch' }, (req) =>
+      c.updateRule(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.delete(
+    '/api/super/automation/rules/:id',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'deleteRule', method: 'delete', status: 204 }, (req) =>
+      c.deleteRule(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/super/automation/rules/:id/preview',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'preview', method: 'get' }, (req) => c.preview(req.params.id)),
+  );
+  r.post(
+    '/api/super/automation/run',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'runNow', method: 'post', status: 200 }, (req) =>
+      c.runNow(req.query.rule as string),
+    ),
+  );
+  r.get(
+    '/api/super/automation/runs',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'runs', method: 'get' }, (req) => c.runs(req.query.rule as string)),
+  );
 }

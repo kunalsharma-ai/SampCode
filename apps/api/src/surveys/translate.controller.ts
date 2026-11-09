@@ -1,18 +1,19 @@
-import { Body, Controller, HttpException, NotFoundException, Param, Post } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { HttpException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
 import type { Prisma } from '@zapx/db';
 import { glossaryFor, textKeys } from '@zapx/logic-engine';
 import { parsePresentation, parseSurveyDefinition, type Presentation } from '@zapx/survey-schema';
 import { parseBody } from '../common/validation';
-import { AuditService } from '../common/audit.service';
-import { PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
-import { AiError, AiProvider } from '../ai/ai-provider';
+import { CAN_EDIT } from '../auth/decorators';
+import { AiError, type AiProvider } from '../ai/ai-provider';
 import { notConfigured } from '../ai/claude.provider';
-import { AiGateway } from '../ai/ai-gateway';
-import { SurveysService } from './surveys.service';
+import { type AiGateway } from '../ai/ai-gateway';
+import { type SurveysService } from './surveys.service';
 
 const translateSchema = z.object({
   language: z.string().min(2).max(35),
@@ -27,7 +28,6 @@ const BATCH = 120;
  * AI translation of the draft's texts. Results are stored as `machine` translations: a language
  * cannot be offered to respondents (or published) until a person has reviewed every text.
  */
-@Controller()
 export class TranslateController {
   constructor(
     private readonly ai: AiProvider,
@@ -37,10 +37,7 @@ export class TranslateController {
     private readonly audit: AuditService,
   ) {}
 
-  @Post('surveys/:id/translate')
-  @Roles(...CAN_EDIT)
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  async translate(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async translate(user: AuthUser, id: string, body: unknown) {
     const input = parseBody(translateSchema, body);
     if (!this.gateway.configured) throw toHttp(notConfigured());
     const draft = await this.surveys.draft(user, id);
@@ -129,4 +126,21 @@ export class TranslateController {
 function toHttp(e: unknown): unknown {
   if (e instanceof AiError) return new HttpException({ message: e.message, code: e.code }, e.status);
   return e;
+}
+
+/** Express routes of TranslateController (mounted by src/http/app.ts). */
+export function translateControllerRoutes(r: Router, c: TranslateController, kit: RouteKit) {
+  r.post(
+    '/api/surveys/:id/translate',
+    ...kit.route(
+      {
+        controller: 'TranslateController',
+        handler: 'translate',
+        method: 'post',
+        roles: [...CAN_EDIT],
+        throttle: { limit: 10, ttl: 60_000 },
+      },
+      (req) => c.translate(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
 }

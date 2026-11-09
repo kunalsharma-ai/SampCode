@@ -1,17 +1,18 @@
-import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Put } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '../http/errors';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
 import { parseBody } from '../common/validation';
 import type { AuthUser } from '../auth/auth.types';
-import { CAN_EDIT, CurrentUser, Roles } from '../auth/decorators';
+import { CAN_EDIT } from '../auth/decorators';
 import { layerSchema, readLayer } from './integration-config';
-import { RedirectRepository } from './redirect.repository';
-import { CallbackWorker } from './callback.worker';
+import { type RedirectRepository } from './redirect.repository';
+import { type CallbackWorker } from './callback.worker';
 
 /** Studio endpoints of the integration module: delivery log, replay, redirect log and defaults. */
-@Controller()
 export class IntegrationsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -27,16 +28,13 @@ export class IntegrationsController {
     return v;
   }
 
-  @Get('vendors/:id/callbacks')
-  async callbacks(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async callbacks(user: AuthUser, id: string) {
     await this.vendor(user, id);
     const [items, counts] = await Promise.all([this.repo.listCallbacks(user.tenantId, id), this.repo.callbackCounts(user.tenantId, id)]);
     return { items, counts: Object.fromEntries(counts.map((c) => [c.state, c._count._all])) };
   }
 
-  @Post('callbacks/:id/replay')
-  @Roles(...CAN_EDIT)
-  async replay(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async replay(user: AuthUser, id: string) {
     const cb = await this.repo.findCallback(user.tenantId, id);
     if (!cb) throw new NotFoundException('Callback not found');
     const vendor = await this.vendor(user, cb.vendorId);
@@ -50,24 +48,20 @@ export class IntegrationsController {
     return updated;
   }
 
-  @Get('vendors/:id/redirect-events')
-  async events(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async events(user: AuthUser, id: string) {
     await this.vendor(user, id);
     return this.repo.listRedirectEvents(user.tenantId, id);
   }
 
   // ---- Redirect defaults: project and organization levels -------------------------------------
 
-  @Get('projects/:id/redirect-defaults')
-  async projectDefaults(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  async projectDefaults(user: AuthUser, id: string) {
     const p = await this.prisma.project.findFirst({ where: { id, ...this.access.projects(user) } });
     if (!p) throw new NotFoundException('Project not found');
     return readLayer(p.redirectDefaults);
   }
 
-  @Put('projects/:id/redirect-defaults')
-  @Roles(...CAN_EDIT)
-  async saveProjectDefaults(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: unknown) {
+  async saveProjectDefaults(user: AuthUser, id: string, body: unknown) {
     const p = await this.prisma.project.findFirst({ where: { id, ...this.access.projects(user) } });
     if (!p) throw new NotFoundException('Project not found');
     const layer = parseBody(layerSchema, body);
@@ -76,14 +70,12 @@ export class IntegrationsController {
     return layer;
   }
 
-  @Get('organization/redirect-defaults')
-  async orgDefaults(@CurrentUser() user: AuthUser) {
+  async orgDefaults(user: AuthUser) {
     const t = await this.prisma.tenant.findUniqueOrThrow({ where: { id: user.tenantId } });
     return readLayer(t.redirectDefaults);
   }
 
-  @Put('organization/redirect-defaults')
-  async saveOrgDefaults(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async saveOrgDefaults(user: AuthUser, body: unknown) {
     if (user.role !== 'ADMIN') throw new ForbiddenException('Only administrators can change organization defaults');
     const t = await this.prisma.tenant.findUniqueOrThrow({ where: { id: user.tenantId } });
     const layer = parseBody(layerSchema, body);
@@ -91,4 +83,50 @@ export class IntegrationsController {
     await this.audit.record(user, 'organization.redirect_defaults', 'tenant', user.tenantId, { before: t.redirectDefaults, after: layer });
     return layer;
   }
+}
+
+/** Express routes of IntegrationsController (mounted by src/http/app.ts). */
+export function integrationsControllerRoutes(r: Router, c: IntegrationsController, kit: RouteKit) {
+  r.get(
+    '/api/vendors/:id/callbacks',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'callbacks', method: 'get' }, (req) =>
+      c.callbacks(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.post(
+    '/api/callbacks/:id/replay',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'replay', method: 'post', roles: [...CAN_EDIT] }, (req) =>
+      c.replay(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/vendors/:id/redirect-events',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'events', method: 'get' }, (req) =>
+      c.events(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.get(
+    '/api/projects/:id/redirect-defaults',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'projectDefaults', method: 'get' }, (req) =>
+      c.projectDefaults(req.user as AuthUser, req.params.id),
+    ),
+  );
+  r.put(
+    '/api/projects/:id/redirect-defaults',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'saveProjectDefaults', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.saveProjectDefaults(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.get(
+    '/api/organization/redirect-defaults',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'orgDefaults', method: 'get' }, (req) =>
+      c.orgDefaults(req.user as AuthUser),
+    ),
+  );
+  r.put(
+    '/api/organization/redirect-defaults',
+    ...kit.route({ controller: 'IntegrationsController', handler: 'saveOrgDefaults', method: 'put' }, (req) =>
+      c.saveOrgDefaults(req.user as AuthUser, req.body),
+    ),
+  );
 }

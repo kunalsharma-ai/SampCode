@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
 import { AiProvider, type ArchitectRequest, type ArchitectResult, type TranslateRequest, type TranslateResult } from './ai-provider';
@@ -8,7 +7,6 @@ import { ClaudeAiProvider, UnconfiguredAiProvider } from './claude.provider';
  * The AI provider set up in Settings > Integrations (or by ANTHROPIC_API_KEY and AI_MODEL until it is).
  * Rebuilt when those settings change, so a new key works at once without a restart.
  */
-@Injectable()
 export class DynamicAiProvider extends AiProvider {
   private built?: { fingerprint: string; provider: AiProvider };
 

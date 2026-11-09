@@ -60,17 +60,12 @@ export default tseslint.config(
     },
   },
   {
-    // NestJS injects constructor parameters by their runtime class, so those imports must stay values.
-    files: ['apps/api/**/*.ts'],
-    rules: { '@typescript-eslint/consistent-type-imports': 'off' },
-  },
-  {
     files: ['apps/studio/**/*.tsx', 'apps/runtime/**/*.tsx', 'packages/survey-renderer/**/*.tsx', 'apps/mobile/**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },
   {
-    files: ['**/*.test.ts', 'e2e/**/*.ts', 'packages/db/src/seed.ts', 'apps/api/src/main.ts'],
+    files: ['**/*.test.ts', 'e2e/**/*.ts', 'packages/db/src/seed.ts', 'apps/api/src/main.ts', 'apps/api/src/worker.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-non-null-assertion': 'off' },
   },
   prettier,

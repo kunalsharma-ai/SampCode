@@ -1,14 +1,9 @@
-/**
- * Dashboard (home screen) summary: one read of the numbers the studio home shows, computed from the
- * organization's real data and limited to the projects the member can see. Test responses are left
- * out everywhere. Respondent rows are read with the tenant's row-level security setting applied.
- */
-import { Controller, Get, Query } from '@nestjs/common';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import type { ResponseStatus, SurveyStatus } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AccessService } from '../common/access.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AccessService } from '../common/access.service';
 import type { AuthUser } from '../auth/auth.types';
-import { CurrentUser, Roles } from '../auth/decorators';
 
 /** Days of daily activity in the trend chart. */
 export const TREND_DAYS = 30;
@@ -59,7 +54,6 @@ export interface DashboardSummary {
 const zeroes = <K extends string>(keys: readonly K[]) => Object.fromEntries(keys.map((k) => [k, 0])) as Record<K, number>;
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
-@Controller('dashboard')
 export class DashboardController {
   constructor(
     private readonly prisma: PrismaService,
@@ -86,9 +80,7 @@ export class DashboardController {
     return rows.map((r) => ({ d: r._id, n: Number(r.n) }));
   }
 
-  @Get()
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  async summary(@CurrentUser() user: AuthUser): Promise<DashboardSummary> {
+  async summary(user: AuthUser): Promise<DashboardSummary> {
     const surveyWhere = this.access.surveys(user);
     const [projects, surveys] = await Promise.all([
       this.prisma.project.count({ where: this.access.projects(user) }),
@@ -197,9 +189,7 @@ export class DashboardController {
   }
 
   /** Top-bar search: projects and surveys the member can see whose name (or client) contains the text. */
-  @Get('search')
-  @Roles('ADMIN', 'PROGRAMMER', 'VIEWER')
-  async search(@CurrentUser() user: AuthUser, @Query('q') q?: string) {
+  async search(user: AuthUser, q?: string) {
     const text = (q ?? '').trim().slice(0, 100);
     if (!text) return { projects: [], surveys: [] };
     const contains = { contains: text, mode: 'insensitive' as const };
@@ -222,4 +212,21 @@ export class DashboardController {
       surveys: surveys.map((s) => ({ id: s.id, name: s.name, status: s.status, projectName: s.project.name })),
     };
   }
+}
+
+/** Express routes of DashboardController (mounted by src/http/app.ts). */
+export function dashboardControllerRoutes(r: Router, c: DashboardController, kit: RouteKit) {
+  r.get(
+    '/api/dashboard',
+    ...kit.route(
+      { controller: 'DashboardController', handler: 'summary', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] },
+      (req) => c.summary(req.user as AuthUser),
+    ),
+  );
+  r.get(
+    '/api/dashboard/search',
+    ...kit.route({ controller: 'DashboardController', handler: 'search', method: 'get', roles: ['ADMIN', 'PROGRAMMER', 'VIEWER'] }, (req) =>
+      c.search(req.user as AuthUser, req.query.q as string),
+    ),
+  );
 }

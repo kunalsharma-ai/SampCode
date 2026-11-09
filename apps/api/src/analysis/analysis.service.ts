@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, PayloadTooLargeException } from '../http/errors';
 import ExcelJS from 'exceljs';
 import type { Prisma } from '@zapx/db';
 import {
@@ -28,9 +28,9 @@ import {
   variableLineage,
 } from '@zapx/logic-engine';
 import { z } from 'zod';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { SurveysService } from '../surveys/surveys.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type SurveysService } from '../surveys/surveys.service';
 import type { AuthUser } from '../auth/auth.types';
 
 /** Analyses read respondent rows into memory; above this, use exports and an analysis tool. */
@@ -133,7 +133,6 @@ export type ReportConfig = z.infer<typeof reportConfigSchema>;
  * client (row-level security applies), then runs @zapx/analysis-core. Optionally weighted by raking
  * to targets (Milestone 15); the weights are computed per run on the selected interviews.
  */
-@Injectable()
 export class AnalysisService {
   constructor(
     private readonly prisma: PrismaService,

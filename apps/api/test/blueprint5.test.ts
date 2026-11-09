@@ -13,17 +13,13 @@ vi.hoisted(() => {
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { AiProvider } from '../src/ai/ai-provider';
 import { AutomationService } from '../src/automation/automation.service';
@@ -50,7 +46,7 @@ class FakeAi extends AiProvider {
   }
 }
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let automation: AutomationService;
@@ -77,11 +73,7 @@ const def = {
 };
 
 beforeAll(async () => {
-  const mod = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(AiProvider)
-    .useValue(new FakeAi())
-    .compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp({ overrides: [[AiProvider, new FakeAi()]] });
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

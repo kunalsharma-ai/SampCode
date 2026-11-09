@@ -18,19 +18,15 @@ vi.hoisted(() => {
   process.env.GEO_COUNTRY_HEADER = 'x-test-country';
 });
 
-import 'reflect-metadata';
 import { createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { config, resetConfig } from '../src/config';
 import { PrismaService } from '../src/common/prisma.service';
-import { FileNotFoundError, FileStore, S3FileStore, SwitchingFileStore } from '../src/jobs/file-store';
+import { FileNotFoundError, FileStore, S3FileStore, type SwitchingFileStore } from '../src/jobs/file-store';
 import { verifyStripeSignature } from '../src/plans/billing.service';
 import { databaseUrlFromParts } from '../src/database-url';
 import { addressOnly } from '../src/bootstrap';
@@ -79,7 +75,7 @@ class MockStripe {
   }
 }
 
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 let s3: MockS3;
@@ -109,8 +105,7 @@ beforeAll(async () => {
     STRIPE_API_BASE: stripe.base,
   });
   resetConfig();
-  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = configureApp(mod.createNestApplication());
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
@@ -577,7 +572,13 @@ describe('running on AWS', () => {
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
     // MongoDB Atlas (infra/terraform/ecs.tf): a DNS seed list, no port.
     expect(
-      databaseUrlFromParts({ DB_HOST: 'sampcode-pl-0.abcde.mongodb.net', DB_SCHEME: 'mongodb+srv', DB_USER: 'zapx', DB_PASSWORD: 'pw', DB_NAME: 'zapx' }),
+      databaseUrlFromParts({
+        DB_HOST: 'sampcode-pl-0.abcde.mongodb.net',
+        DB_SCHEME: 'mongodb+srv',
+        DB_USER: 'zapx',
+        DB_PASSWORD: 'pw',
+        DB_NAME: 'zapx',
+      }),
     ).toBe('mongodb+srv://zapx:pw@sampcode-pl-0.abcde.mongodb.net/zapx?retryWrites=true&w=majority'); // secret-scan:allow (made-up test password)
   });
 

@@ -1,28 +1,18 @@
-/**
- * CAPI (face-to-face interviewing) on the server side: interviewer assignments, the survey package
- * the offline app downloads, and sync of interviews recorded offline.
- *
- * The device is never trusted. Every uploaded interview is replayed against the published version it
- * was recorded on (same logic engine), so the server decides the outcome, the quotas and the quality
- * score. Uploads are idempotent by the device-generated client id, so a retried sync never stores an
- * interview twice. Interviews are never thrown away: answers that do not fit the version are kept as
- * technical_error for a person to look at.
- */
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '../http/errors';
 import { createHash, randomBytes } from 'node:crypto';
 import { Prisma, type ResponseStatus, type SurveyVersion } from '@zapx/db';
 import { checkGeofence, classifyDevice, prepareSurvey, replayInterview } from '@zapx/logic-engine';
 import { takeQuotaPlaces } from '../quotas/quota-places';
 import { capiSettingsOf, type Answers, type SurveyDefinition } from '@zapx/survey-schema';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
-import { AccessService } from '../common/access.service';
-import { WebhookService } from '../integrations/webhook.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
+import { type AccessService } from '../common/access.service';
+import { type WebhookService } from '../integrations/webhook.service';
 import type { RedirectStatus } from '@zapx/redirect-core';
 import type { AuthUser } from '../auth/auth.types';
-import { QualityService } from '../quality/quality.service';
-import { CaptureService } from '../captures/capture.service';
+import { type QualityService } from '../quality/quality.service';
+import { type CaptureService } from '../captures/capture.service';
 
 export interface UploadedInterview {
   clientId: string;
@@ -76,7 +66,6 @@ class QuotaFullAtSync extends Error {
   }
 }
 
-@Injectable()
 export class CapiService {
   constructor(
     private readonly prisma: PrismaService,

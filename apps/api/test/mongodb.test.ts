@@ -4,7 +4,6 @@
  * workers, duplicate-skipping inserts stay idempotent under races, and filters treat null as
  * PostgreSQL did.
  */
-import 'reflect-metadata';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SurveyDefinition } from '@zapx/survey-schema';
 import { PrismaService } from '../src/common/prisma.service';

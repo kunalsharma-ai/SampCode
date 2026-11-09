@@ -14,15 +14,11 @@ vi.hoisted(() => {
   process.env.LOGIN_RATE_PER_MINUTE = '100';
 });
 
-import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { createApp, type ApiApp } from '../src/http/app';
 import { DbThrottlerStorage, throttleStore } from '../src/common/db-throttler-storage';
 import { PrismaService, TENANT_ISOLATED_MODELS } from '../src/common/prisma.service';
 import { signingKey } from '../src/common/signing-keys';
@@ -31,7 +27,7 @@ import { testSignature } from '../src/interview/interview.service';
 
 const run = `hard${Date.now().toString(36)}`;
 const password = 'correct-horse-battery';
-let app: INestApplication;
+let app: ApiApp;
 let http: ReturnType<typeof request>;
 let prisma: PrismaService;
 
@@ -53,9 +49,7 @@ function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
 
 beforeAll(async () => {
   resetConfig();
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = moduleRef.createNestApplication();
-  configureApp(app);
+  app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);

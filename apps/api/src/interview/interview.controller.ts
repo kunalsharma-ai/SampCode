@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Headers, HttpCode, Ip, Param, Post } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import type { Router } from 'express';
+import type { RouteKit } from '../http/routes';
 import { z } from 'zod';
-import { Public } from '../auth/decorators';
+
 import { parseBody } from '../common/validation';
-import { InterviewService } from './interview.service';
+import { type InterviewService } from './interview.service';
 import { config } from '../config';
 
 const signalsSchema = z.object({
@@ -30,22 +30,16 @@ const clientSchema = z.object({
 const languageSchema = z.object({ language: z.string().min(2).max(35) });
 
 /** Respondent-facing endpoints. No login: access is by signed link and an unguessable session token. */
-@Public()
-@Throttle({ default: { limit: 120, ttl: 60_000 } })
-@Controller('public')
 export class InterviewController {
   constructor(private readonly interview: InterviewService) {}
 
-  @Post('s/:surveyId/start')
-  @HttpCode(200)
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   start(
-    @Param('surveyId') surveyId: string,
-    @Body() body: unknown,
-    @Ip() ip: string,
-    @Headers() headers: Record<string, string | string[] | undefined>,
-    @Headers('user-agent') userAgent?: string,
-    @Headers('accept-language') acceptLanguage?: string,
+    surveyId: string,
+    body: unknown,
+    ip: string,
+    headers: Record<string, string | string[] | undefined>,
+    userAgent?: string,
+    acceptLanguage?: string,
   ) {
     const geoHeader = config().GEO_COUNTRY_HEADER;
     const geo = geoHeader ? headers[geoHeader] : undefined;
@@ -61,27 +55,95 @@ export class InterviewController {
     });
   }
 
-  @Post('r/:token/language')
-  @HttpCode(200)
-  language(@Param('token') token: string, @Body() body: unknown) {
+  language(token: string, body: unknown) {
     return this.interview.setLanguage(token, parseBody(languageSchema, body).language);
   }
 
-  @Get('r/:token')
-  state(@Param('token') token: string) {
+  state(token: string) {
     return this.interview.state(token);
   }
 
-  @Post('r/:token/answers')
-  @HttpCode(200)
-  submit(@Param('token') token: string, @Body() body: unknown) {
+  submit(token: string, body: unknown) {
     const input = parseBody(answersSchema, body);
     return this.interview.submit(token, input.pageId, input.answers, input.signals);
   }
 
-  @Post('r/:token/back')
-  @HttpCode(200)
-  back(@Param('token') token: string) {
+  back(token: string) {
     return this.interview.back(token);
   }
+}
+
+/** Express routes of InterviewController (mounted by src/http/app.ts). */
+export function interviewControllerRoutes(r: Router, c: InterviewController, kit: RouteKit) {
+  r.post(
+    '/api/public/s/:surveyId/start',
+    ...kit.route(
+      {
+        controller: 'InterviewController',
+        handler: 'start',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: 30, ttl: 60_000 },
+      },
+      (req) =>
+        c.start(
+          req.params.surveyId,
+          req.body,
+          req.ip as unknown as string,
+          req.headers as unknown as Record<string, string | string[] | undefined>,
+          req.headers['user-agent'] as unknown as string,
+          req.headers['accept-language'] as unknown as string,
+        ),
+    ),
+  );
+  r.post(
+    '/api/public/r/:token/language',
+    ...kit.route(
+      {
+        controller: 'InterviewController',
+        handler: 'language',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: 120, ttl: 60_000 },
+      },
+      (req) => c.language(req.params.token, req.body),
+    ),
+  );
+  r.get(
+    '/api/public/r/:token',
+    ...kit.route(
+      { controller: 'InterviewController', handler: 'state', method: 'get', public: true, throttle: { limit: 120, ttl: 60_000 } },
+      (req) => c.state(req.params.token),
+    ),
+  );
+  r.post(
+    '/api/public/r/:token/answers',
+    ...kit.route(
+      {
+        controller: 'InterviewController',
+        handler: 'submit',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: 120, ttl: 60_000 },
+      },
+      (req) => c.submit(req.params.token, req.body),
+    ),
+  );
+  r.post(
+    '/api/public/r/:token/back',
+    ...kit.route(
+      {
+        controller: 'InterviewController',
+        handler: 'back',
+        method: 'post',
+        status: 200,
+        public: true,
+        throttle: { limit: 120, ttl: 60_000 },
+      },
+      (req) => c.back(req.params.token),
+    ),
+  );
 }

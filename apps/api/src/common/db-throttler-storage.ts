@@ -1,9 +1,7 @@
-import { Logger } from '@nestjs/common';
-import { ThrottlerStorageService, type ThrottlerStorage } from '@nestjs/throttler';
+import { Logger } from '../http/logger';
+import { MemoryThrottleStore, type ThrottleRecord, type ThrottleStore } from '../http/throttle';
 import { config } from '../config';
-import { PrismaService } from './prisma.service';
-
-type ThrottlerStorageRecord = Awaited<ReturnType<ThrottlerStorage['increment']>>;
+import { type PrismaService } from './prisma.service';
 
 /** A date as $runCommandRaw returns it (extended JSON). */
 type MongoDate = { $date: string | { $numberLong: string } } | string;
@@ -25,9 +23,9 @@ interface Row {
  * `blockDuration`. One upsert per request. If the database cannot be reached the request is counted
  * in this process instead (logged), so the limiter never becomes the reason the API is down.
  */
-export class DbThrottlerStorage implements ThrottlerStorage {
+export class DbThrottlerStorage implements ThrottleStore {
   private readonly log = new Logger('RateLimit');
-  private readonly fallback = new ThrottlerStorageService();
+  private readonly fallback = new MemoryThrottleStore();
   private sweeper?: NodeJS.Timeout;
   private warned = 0;
 
@@ -45,7 +43,7 @@ export class DbThrottlerStorage implements ThrottlerStorage {
     }
   }
 
-  async increment(key: string, ttl: number, limit: number, blockDuration: number, throttlerName: string): Promise<ThrottlerStorageRecord> {
+  async increment(key: string, ttl: number, limit: number, blockDuration: number, throttlerName: string): Promise<ThrottleRecord> {
     const id = `${throttlerName}:${key}`;
     if (!this.sweeper) {
       // Every 5 minutes, remove counters whose window and block both ended (a minute of grace).

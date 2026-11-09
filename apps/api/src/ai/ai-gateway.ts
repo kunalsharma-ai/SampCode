@@ -1,25 +1,10 @@
-/**
- * AI model gateway. Every AI call in SampCode goes through `run()`, which applies, in order:
- *
- *   1. provider and model selection per task (configuration only, nothing hardcoded),
- *   2. tenant permissions (AI on/off, allowed tasks),
- *   3. per-tenant rate limits (per minute, per day) and a monthly spend cap,
- *   4. a circuit breaker per provider and model,
- *   5. usage and cost accounting (AiUsage) and an audit event for every call.
- *
- * Retries of transient provider errors happen inside the provider SDK (AI_MAX_RETRIES).
- * Redaction is applied by callers that send user-supplied free text (see redact.ts), because
- * only they know which inputs are data that may contain personal information.
- * The gateway never applies AI output: results are proposals a person reviews (change sets,
- * machine translations).
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import { config, type ModelPrice } from '../config';
 import { integration } from '../platform/integrations';
-import { AuditService } from '../common/audit.service';
-import { AiError, AiProvider, type AiTokenUsage } from './ai-provider';
+import { type AuditService } from '../common/audit.service';
+import { AiError, type AiProvider, type AiTokenUsage } from './ai-provider';
 import { notConfigured } from './claude.provider';
-import { AiUsageRepository } from './ai-usage.repository';
+import { type AiUsageRepository } from './ai-usage.repository';
 import { CircuitBreaker } from './circuit-breaker';
 
 export const AI_TASKS = ['architect', 'translate', 'insights'] as const;
@@ -65,7 +50,6 @@ function aiPricing(): Record<string, ModelPrice> {
 
 const startOfMonth = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 
-@Injectable()
 export class AiGateway {
   private readonly log = new Logger('AiGateway');
   readonly breaker: CircuitBreaker;

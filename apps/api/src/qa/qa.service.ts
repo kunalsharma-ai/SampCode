@@ -1,12 +1,12 @@
-import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { NotFoundException, UnprocessableEntityException } from '../http/errors';
 import { randomInt } from 'node:crypto';
 import type { Prisma } from '@zapx/db';
 import { simulateSurvey } from '@zapx/logic-engine';
 import { parseSurveyDefinition } from '@zapx/survey-schema';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import type { AuthUser } from '../auth/auth.types';
-import { SurveysService } from '../surveys/surveys.service';
+import { type SurveysService } from '../surveys/surveys.service';
 
 export interface QaRunInput {
   respondents: number;
@@ -15,7 +15,6 @@ export interface QaRunInput {
 }
 
 /** One QA Laboratory run, used by the request endpoint (small runs) and the job worker (large runs). */
-@Injectable()
 export class QaService {
   constructor(
     private readonly prisma: PrismaService,

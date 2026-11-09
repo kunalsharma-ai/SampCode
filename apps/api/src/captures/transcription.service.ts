@@ -1,20 +1,8 @@
-/**
- * Transcription of interview recordings (Milestone 17). A reviewer asks for it; a background job
- * sends each recording to a speech-to-text provider and keeps the text with the recording, so the
- * review queue can show what was said next to the answers.
- *
- * - Off by default (TRANSCRIPTION=off): no recording leaves SampCode.
- * - Provider: Deepgram pre-recorded transcription (`POST /v1/listen`, the audio as the body). The
- *   model is a setting (DEEPGRAM_MODEL), never hardcoded. Another provider is one class.
- * - The transcript is personal data like the recording: same access, deleted with the recording.
- *
- * Tested against a local stand-in of the Deepgram API only.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import { config } from '../config';
 import { integration } from '../platform/integrations';
-import { PrismaService } from '../common/prisma.service';
-import { FileStore } from '../jobs/file-store';
+import { type PrismaService } from '../common/prisma.service';
+import { type FileStore } from '../jobs/file-store';
 
 export interface Transcript {
   text: string;
@@ -72,7 +60,6 @@ export class DeepgramProvider implements SpeechToTextProvider {
 /** Longest transcript kept (characters); a two-hour interview is well under this. */
 const MAX_TEXT = 200_000;
 
-@Injectable()
 export class TranscriptionService {
   private readonly log = new Logger('Transcription');
   private provider: SpeechToTextProvider | null | undefined;

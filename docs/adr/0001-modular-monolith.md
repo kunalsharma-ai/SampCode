@@ -1,6 +1,6 @@
 # 0001 · Modular monolith with separable modules
 
-Date: 2026-11-01 · Status: Accepted
+Date: 2026-11-01 · Status: Accepted. The API runs on plain Express since ADR 0041 and on MongoDB since ADR 0040; the module boundaries below still hold.
 
 ## Context
 

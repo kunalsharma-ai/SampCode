@@ -1,15 +1,10 @@
-/**
- * The interview flow depends only on the abstract RedirectService. LocalRedirectService
- * implements it in-process on top of @zapx/redirect-core and RedirectRepository; an
- * HTTP client for a separate redirect service could replace it without other changes.
- */
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '../http/logger';
 import type { Response, Vendor } from '@zapx/db';
 import { planCallback, resolveRedirect, type RedirectStatus, type ResolvedRedirect, type RespondentContext } from '@zapx/redirect-core';
-import { SecretBox } from '../platform/secret-box';
-import { WebhookService } from './webhook.service';
+import { type SecretBox } from '../platform/secret-box';
+import { type WebhookService } from './webhook.service';
 import { toIntegrationConfig } from './integration-config';
-import { RedirectRepository } from './redirect.repository';
+import { type RedirectRepository } from './redirect.repository';
 
 export interface RespondentRedirectContext {
   /** "none" when the respondent was rejected before a response was recorded. */
@@ -46,7 +41,6 @@ export abstract class RedirectService {
 
 const toCore = (vendor: Vendor, r: RespondentRedirectContext): RespondentContext => ({ ...r, vendorCode: vendor.code });
 
-@Injectable()
 export class LocalRedirectService extends RedirectService {
   private readonly log = new Logger('Redirects');
 

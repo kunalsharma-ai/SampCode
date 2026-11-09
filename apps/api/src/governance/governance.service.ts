@@ -1,27 +1,13 @@
-/**
- * Blueprint phase 5: data residency and retention for an organization.
- *
- * Residency: SampCode runs where it is deployed; it cannot move data between regions by itself. The
- * deployment declares its region (DATA_REGION) and the organization says where its data must stay.
- * SampCode shows whether the two match, lists which configured services send data outside the
- * deployment, and can refuse those (AI, transcription, network reputation lookups) for the
- * organization. That is a control on what SampCode sends, not a certification.
- *
- * Retention: after the chosen number of days, interviews are erased (answers, link parameters,
- * device and network identifiers, location, evidence, photos and recordings; the row keeps its
- * status and timings so fieldwork counts stay true, and analyses leave it out), captures are
- * deleted, and contacts lose their email, phone, name and columns. Contacts who unsubscribed keep
- * their address so they are never invited again. The worker applies the policy once an hour.
- */
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException } from '../http/errors';
+import { Logger } from '../http/logger';
 import { z } from 'zod';
 import type { Prisma } from '@zapx/db';
-import { PrismaService } from '../common/prisma.service';
-import { AuditService } from '../common/audit.service';
+import { type PrismaService } from '../common/prisma.service';
+import { type AuditService } from '../common/audit.service';
 import { integration } from '../platform/integrations';
 import type { AuthUser } from '../auth/auth.types';
 import { config } from '../config';
-import { CaptureService } from '../captures/capture.service';
+import { type CaptureService } from '../captures/capture.service';
 
 const days = z.number().int().min(1).max(3650).nullable().optional();
 export const retentionSchema = z.object({ responsesDays: days, capturesDays: days, contactsDays: days }).strict();
@@ -68,7 +54,6 @@ export function externalProcessors() {
   ];
 }
 
-@Injectable()
 export class GovernanceService {
   private readonly log = new Logger('Retention');
 

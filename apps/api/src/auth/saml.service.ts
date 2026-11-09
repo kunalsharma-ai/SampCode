@@ -1,15 +1,3 @@
-/**
- * SAML 2.0 single sign-on (Milestone 13), next to OpenID Connect. SampCode is the service provider:
- * SP-initiated sign-in only, AuthnRequest by HTTP-Redirect, the response by HTTP-POST to the ACS URL.
- *
- * Checks (by @node-saml/node-saml, configured strictly here): the assertion is signed by one of the
- * organization's IdP certificates (wantAssertionsSigned), the Audience is SampCode's entity ID, timestamps hold within 60 s of skew, and InResponseTo matches a
- * request SampCode made in the last 10 minutes. SampCode itself
- * checks that the signed assertion's Issuer is the IdP entity ID (the library does not for sign-ins). Each request can be answered once: its row is deleted
- * when the response is checked, so a captured response cannot be replayed. IdP-initiated sign-in
- * (a response with no request) is refused, because it cannot be bound to a browser.
- */
-import { Injectable } from '@nestjs/common';
 import { randomBytes, X509Certificate } from 'node:crypto';
 import {
   SAML,
@@ -21,7 +9,7 @@ import {
 } from '@node-saml/node-saml';
 import type { TenantSso } from '@zapx/db';
 import { config } from '../config';
-import { PrismaService } from '../common/prisma.service';
+import { type PrismaService } from '../common/prisma.service';
 import { SsoError } from './sso-error';
 
 const REQUEST_TTL_MS = 10 * 60_000;
@@ -72,7 +60,6 @@ export interface SamlLogin {
   next: string;
 }
 
-@Injectable()
 export class SamlService {
   constructor(private readonly prisma: PrismaService) {}
 
