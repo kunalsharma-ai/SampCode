@@ -1,6 +1,6 @@
 # 0020: Edge protection, autoscaling and backups on AWS
 
-Status: Accepted (Milestone 14). Extends 0019's AWS stack.
+Status: Superseded by [ADR 0042](0042-docker-compose-deployment.md) (2026-11-09): production runs on Docker Compose; the Terraform described here was removed. Accepted (Milestone 14), extending 0019's AWS stack.
 
 ## Context
 

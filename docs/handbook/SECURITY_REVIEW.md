@@ -255,7 +255,7 @@ finding ends with what the fix changed.
 
 ### S13. `'wasm-unsafe-eval'` in the runtime CSP (Info) _(PR #37)_
 
-`infra/nginx/runtime-headers.conf` and the CloudFront policy in `infra/terraform/edge.tf` add
+`infra/nginx/runtime-headers.conf` (and, until ADR 0042 removed it, the CloudFront policy in Terraform) adds
 `'wasm-unsafe-eval'` so the eye-tracking model's WebAssembly can compile. It does not allow
 JavaScript `eval()`. Accepted by design ([ADR 0034](../adr/0034-webcam-eye-tracking.md)).
 

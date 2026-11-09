@@ -247,29 +247,31 @@ describe('forgot password', () => {
   });
 });
 
-describe('AWS app secret', () => {
-  const infra = (f: string) => readFileSync(join(__dirname, '../../../infra/terraform', f), 'utf8');
-  const keys = JSON.parse(/variable "app_secret_keys"[\s\S]*?default\s*=\s*(\[[^\]]*\])/.exec(infra('variables.tf'))![1]) as string[];
+// The production Docker Compose file (ADR 0042) replaced the AWS Terraform these checks used to read.
+describe('production compose file', () => {
+  const root = join(__dirname, '../../..');
+  const compose = readFileSync(join(root, 'docker-compose.prod.yml'), 'utf8');
+  const example = readFileSync(join(root, '.env.production.example'), 'utf8');
+  /** The block of one service: from its name to the next service at the same indentation. */
+  const service = (name: string) => new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|\\nvolumes:)`).exec(compose)![1];
 
-  it('lists every secret setting of the API', () => {
-    for (const k of [
-      'JWT_SECRET',
-      'SECRETS_KEY',
-      'SIGNING_KEYS_SECRET',
-      'ANTHROPIC_API_KEY',
-      'STRIPE_SECRET_KEY',
-      'STRIPE_WEBHOOK_SECRET',
-      'IPINFO_TOKEN',
-      'DEEPGRAM_API_KEY',
-      'TWILIO_AUTH_TOKEN',
-      'SENDGRID_API_KEY',
-    ])
-      expect(keys).toContain(k);
+  it('refuses to start without its own secrets, and ships none', () => {
+    for (const k of ['JWT_SECRET', 'SECRETS_KEY', 'SIGNING_KEYS_SECRET', 'MONGO_ROOT_PASSWORD', 'MONGO_APP_PASSWORD']) {
+      expect(compose).toContain(`\${${k}:?`);
+      expect(example).toMatch(new RegExp(`^${k}=$`, 'm'));
+    }
   });
 
-  it('matches the example secret JSON in the Terraform README, so the first release can start', () => {
-    const json = /--secret-string '(\{[\s\S]*?\})'/.exec(infra('README.md'))![1];
-    const documented = Object.keys(JSON.parse(json));
-    for (const k of keys) expect(documented).toContain(k);
+  it('fixes the settings production needs', () => {
+    expect(compose).toMatch(/^ {2}NODE_ENV: production$/m);
+    expect(compose).toMatch(/^ {2}COOKIE_SECURE: 'true'$/m);
+    expect(compose).toMatch(/^ {2}ALLOW_SIGNUP: \$\{ALLOW_SIGNUP:-false\}$/m);
+  });
+
+  it('publishes only Caddy, and the apps use the limited database user', () => {
+    const published = [...compose.matchAll(/\n {2}([a-z-]+):\n(?:(?!\n {2}[a-z-]+:\n)[\s\S])*?\n {4}ports:/g)].map((m) => m[1]);
+    expect(published).toEqual(['caddy']);
+    expect(service('mongo')).toContain('--keyFile');
+    expect(compose).toMatch(/x-db-url: &db-url mongodb:\/\/\$\{MONGO_APP_USER:\?/);
   });
 });

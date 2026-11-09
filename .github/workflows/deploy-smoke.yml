@@ -1,0 +1,69 @@
+# Boots the production Docker Compose deployment (docker-compose.prod.yml) the way a server runs it:
+# Caddy with HTTPS in front, MongoDB with a password and key file, the backup service. Caddy gives
+# *.localhost names certificates from its own local authority, so no real domain is needed here.
+name: deploy-smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - docker-compose.prod.yml
+      - .env.production.example
+      - infra/**
+      - Dockerfile
+      - .github/workflows/deploy-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  compose-prod:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    env:
+      DC: docker compose -f docker-compose.prod.yml --env-file .env.production
+    steps:
+      - uses: actions/checkout@v7
+      - name: Write .env.production
+        run: |
+          {
+            echo "STUDIO_DOMAIN=studio.localhost"
+            echo "RUNTIME_DOMAIN=survey.localhost"
+            echo "CAPI_DOMAIN=capi.localhost"
+            echo "ACME_EMAIL=ops@example.com"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "SECRETS_KEY=$(openssl rand -hex 32)"
+            echo "SIGNING_KEYS_SECRET=$(openssl rand -hex 32)"
+            echo "MONGO_ROOT_USER=root"
+            echo "MONGO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+            echo "MONGO_APP_USER=sampcode"
+            echo "MONGO_APP_PASSWORD=$(openssl rand -hex 24)"
+            echo "BACKUP_DIR=./backups"
+          } > .env.production
+      - run: $DC build
+      - run: $DC up -d
+      - name: Wait for the studio, respondent runtime and interviewer app over HTTPS
+        run: |
+          for i in $(seq 1 60); do
+            if curl -kfsS https://studio.localhost/api/health && curl -kfsS -o /dev/null https://studio.localhost/login \
+              && curl -kfsS -o /dev/null https://survey.localhost/ && curl -kfsS https://survey.localhost/api/health \
+              && curl -kfsS -o /dev/null https://capi.localhost/sw.js && curl -kfsS https://capi.localhost/api/health; then
+              echo "stack is up"; exit 0
+            fi
+            sleep 5
+          done
+          $DC ps -a; $DC logs --tail 80; exit 1
+      - name: MongoDB is not published on the host
+        run: |
+          if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then echo "port 27017 is open on the host"; exit 1; fi
+      - name: A backup can be taken and restored
+        run: |
+          $DC exec -T backup bash -c '/scripts/backup.sh /backups'
+          f=$(ls -1t backups/sampcode-*.archive.gz | head -1); test -s "$f"; echo "backup: $f"
+          $DC exec -T backup bash -c "mongorestore --uri=\"\$DATABASE_URL\" --gzip --archive=/backups/$(basename "$f") --drop --stopOnError"
+          $DC run --rm migrate
+      - if: failure()
+        run: $DC ps -a; $DC logs --tail 120
+      - if: always()
+        run: $DC down -v

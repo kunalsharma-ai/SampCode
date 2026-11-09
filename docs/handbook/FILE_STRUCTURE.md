@@ -30,7 +30,7 @@ Sampledge-ZAPX/
 │   └── db/                     Prisma schema, MongoDB index setup, client, seed
 ├── e2e/                        Playwright browser tests through the real apps
 ├── docs/                       ADRs, module guides, API contracts, operations, this handbook
-├── infra/                      nginx configs, backup/restore and AWS release scripts, Terraform
+├── infra/                      nginx and Caddy configs, MongoDB init script, backup/restore scripts
 ├── scripts/                    check.sh (quality gate), secret-scan.mjs, projexa-check.mjs
 ├── .github/                    CI and CodeQL workflows (not running on this account), Dependabot, PR template, CODEOWNERS
 ├── .githooks/                  pre-commit and pre-push secret scan
@@ -274,23 +274,24 @@ Unit tests sit next to the code as `*.test.ts` (Vitest).
 
 ## 7. `e2e`, `infra`, `scripts`, `docs`
 
-| Path                                         | Responsibility                                                                                                                   |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `e2e/playwright.config.ts`                   | starts the built API, studio, runtime and CAPI app with test settings (stand-ins for Deepgram and Twilio)                        |
-| `e2e/tests/*.spec.ts`                        | one browser test per milestone/phase; `e2e/fixtures/` media files                                                                |
-| `infra/nginx/*.conf`                         | runtime and CAPI static hosting, `/api` proxy, security headers                                                                  |
-| `infra/scripts/backup.sh`, `restore.sh`      | `mongodump` / `mongorestore` of the database                                                                                     |
-| `infra/scripts/deploy-aws.sh`                | release to AWS (build, push, migrate, roll out, publish static apps)                                                             |
-| `infra/terraform/*.tf`                       | AWS: network, ECS, MongoDB Atlas (`database.tf`), S3, CloudFront, WAF, autoscaling, backups, monitoring; `tests/plan.tftest.hcl` |
-| `scripts/check.sh`                           | `pnpm check`: the full local quality gate                                                                                        |
-| `scripts/secret-scan.mjs`                    | blocks secrets in commits (hooks and `pnpm check`)                                                                               |
-| `scripts/projexa-check.mjs`                  | end-to-end check of the PROJEXA contract                                                                                         |
-| `docs/adr/`                                  | architecture decisions 0001–0037                                                                                                 |
-| `docs/modules/`                              | module guides (redirects, AI gateway, data quality, CAPI, CATI, analytics, jobs, SSO, billing, webhooks, rich media, access)     |
-| `docs/api/openapi.yaml`, `capi-openapi.yaml` | partner (vendor) API and CAPI API contracts                                                                                      |
-| `docs/operations/`                           | database operations, go-live steps, GitHub security settings, merge order, mobile release (PR #40)                               |
-| `docs/product/blueprint-parity.md`           | the blueprint feature matrix                                                                                                     |
-| `docs/handbook/`                             | this handbook                                                                                                                    |
+| Path                                                 | Responsibility                                                                                                               |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `e2e/playwright.config.ts`                           | starts the built API, studio, runtime and CAPI app with test settings (stand-ins for Deepgram and Twilio)                    |
+| `e2e/tests/*.spec.ts`                                | one browser test per milestone/phase; `e2e/fixtures/` media files                                                            |
+| `infra/nginx/*.conf`                                 | runtime and CAPI static hosting, `/api` proxy, security headers                                                              |
+| `infra/scripts/backup.sh`, `restore.sh`              | `mongodump` / `mongorestore` of the database                                                                                 |
+| `docker-compose.prod.yml`, `.env.production.example` | production on one server (ADR 0042): Caddy, MongoDB with passwords, API, worker, apps, backups                               |
+| `infra/caddy/Caddyfile`                              | HTTPS for the three domains, `/api/` to the API                                                                              |
+| `infra/mongo/create-app-user.sh`                     | first start of MongoDB: the `readWrite` user the apps connect as                                                             |
+| `scripts/check.sh`                                   | `pnpm check`: the full local quality gate                                                                                    |
+| `scripts/secret-scan.mjs`                            | blocks secrets in commits (hooks and `pnpm check`)                                                                           |
+| `scripts/projexa-check.mjs`                          | end-to-end check of the PROJEXA contract                                                                                     |
+| `docs/adr/`                                          | architecture decisions 0001–0037                                                                                             |
+| `docs/modules/`                                      | module guides (redirects, AI gateway, data quality, CAPI, CATI, analytics, jobs, SSO, billing, webhooks, rich media, access) |
+| `docs/api/openapi.yaml`, `capi-openapi.yaml`         | partner (vendor) API and CAPI API contracts                                                                                  |
+| `docs/operations/`                                   | database operations, go-live steps, GitHub security settings, merge order, mobile release (PR #40)                           |
+| `docs/product/blueprint-parity.md`                   | the blueprint feature matrix                                                                                                 |
+| `docs/handbook/`                                     | this handbook                                                                                                                |
 
 ## 8. Which files to change for a feature
 
@@ -306,7 +307,7 @@ Unit tests sit next to the code as `*.test.ts` (Vitest).
 | New analysis statistic                  | `packages/analysis-core/src/index.ts` → `apps/api/src/analysis/analysis.service.ts` → `apps/studio/components/Analysis.tsx`                                                                                                                                                                                                                           |
 | New background job type                 | `apps/api/src/jobs/job.worker.ts` (`JOB_TYPES`, `handle`) → `jobs.controller.ts` (enqueue route) → studio component using `/jobs/:id`                                                                                                                                                                                                                 |
 | New webhook event                       | `apps/api/src/integrations/webhook.service.ts` (`WEBHOOK_EVENTS`, emit) → `apps/api/src/automation/automation-rules.ts` (if rules should listen) → `docs/modules/webhooks.md`                                                                                                                                                                         |
-| New environment variable                | `apps/api/src/config.ts` → `.env.example` → `infra/terraform` (`app_environment` or secret) → [CONFIGURATION.md](CONFIGURATION.md)                                                                                                                                                                                                                    |
+| New environment variable                | `apps/api/src/config.ts` → `.env.example` → `.env.production.example` (if production needs it) → [CONFIGURATION.md](CONFIGURATION.md)                                                                                                                                                                                                                 |
 | New gated feature or API route (PR #41) | `apps/api/src/super-admin/features.ts` (`FEATURES` and the `RULES` route map) → plans in the super admin console → `apps/mobile/src/lib/features.ts` if mobile uses it                                                                                                                                                                                |
 | New studio page                         | `apps/studio/app/<route>/page.tsx` (start it with `PageHeader`, PR #39) → `components/Shell.tsx` (menu item)                                                                                                                                                                                                                                          |
 | New setting on the Settings page        | component in `apps/studio/components/` → embed in `apps/studio/app/settings/page.tsx` → API controller                                                                                                                                                                                                                                                |

@@ -1,6 +1,6 @@
 # 0005 · Containers locally, AWS (ECS/Fargate) in production
 
-Date: 2026-11-01 · Status: Accepted
+Date: 2026-11-01 · Status: Superseded by [ADR 0042](0042-docker-compose-deployment.md) (Docker Compose; Terraform and AWS removed, 2026-11-09)
 
 ## Context
 

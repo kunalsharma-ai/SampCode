@@ -14,7 +14,7 @@ are the ones that work today. Steps marked **you** need the repository owner; no
   - before every commit (staged changes) and every push (all tracked files), through the hooks in
     `.githooks/`. `pnpm install` turns them on; `pnpm hooks:install` does it by hand.
   - `node scripts/secret-scan.mjs --history` checks every line ever committed on the branches you fetched.
-- **`.gitignore`** covers env files, keys, credentials and Terraform state.
+- **`.gitignore`** covers env files (including `.env.production`), keys, credentials and the `backups/` folder.
 - **Dependabot configuration** (`.github/dependabot.yml`) and **CODEOWNERS**.
 - **`pnpm audit`** in `pnpm check` fails on high and critical advisories.
 

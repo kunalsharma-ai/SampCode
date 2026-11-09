@@ -41,12 +41,14 @@ step "Mobile app (type check and unit tests)"
 
 if [ "$quick" = 0 ]; then
   step "Dependency audit (high and critical)"; pnpm audit --prod --audit-level high; passed+=("audit")
-  if command -v terraform >/dev/null 2>&1; then
-    step "AWS infrastructure (terraform fmt, validate and mocked plan tests)"
-    ( cd infra/terraform && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null \
-      && terraform validate && terraform test ); passed+=("terraform")
+  if docker compose version >/dev/null 2>&1; then
+    step "Production compose file (docker compose config)"
+    # Placeholder values only: the file refuses to load without the required settings.
+    STUDIO_DOMAIN=app.test RUNTIME_DOMAIN=survey.test CAPI_DOMAIN=capi.test ACME_EMAIL=ops@app.test \
+      JWT_SECRET=x SECRETS_KEY=y SIGNING_KEYS_SECRET=z MONGO_ROOT_PASSWORD=r MONGO_APP_PASSWORD=p ENV_FILE=.env.production.example \
+      docker compose -f docker-compose.prod.yml --env-file .env.production.example config -q; passed+=("compose")
   else
-    echo "Terraform is not installed: skipped the infrastructure checks (infra/terraform/README.md)."
+    echo "Docker Compose is not installed: skipped the production compose check."
   fi
   if [ "$e2e" = 1 ]; then
     step "End-to-end tests (starts API, studio, runtime and CAPI app)"; pnpm e2e; passed+=("e2e")

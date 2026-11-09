@@ -1,0 +1,175 @@
+# SampCode in production on one Linux server with Docker Compose (ADR 0042).
+#
+#   cp .env.production.example .env.production   # then fill it in (docs/operations/go-live.md)
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# (--env-file fills in the ${...} below; the API and worker also read the whole file.)
+#
+# Only Caddy is reachable from outside (ports 80 and 443). It gets HTTPS certificates by itself and
+# sends each domain to its app, and every /api/ request to the API. MongoDB, the API and the apps
+# are reachable only inside the compose network.
+#
+# docker-compose.yml is the local stack (example secrets, open ports); do not deploy it.
+name: sampcode
+
+x-restart: &restart
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+# The apps connect as MONGO_APP_USER (readWrite on zapx only, infra/mongo/create-app-user.sh). The
+# password goes into a URL as it is, so it must be letters and digits (openssl rand -hex 24).
+x-db-url: &db-url mongodb://${MONGO_APP_USER:?set MONGO_APP_USER}:${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD}@mongo:27017/zapx?authSource=admin&replicaSet=rs0&maxPoolSize=20
+
+# Every other setting (AI, email, telephony, S3, SampAudience, ...) comes from .env.production as it
+# is (env_file below); the values here are fixed for this deployment and win over that file.
+x-api-env: &api-env
+  NODE_ENV: production
+  DATABASE_URL: *db-url
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+  SECRETS_KEY: ${SECRETS_KEY:?set SECRETS_KEY}
+  SIGNING_KEYS_SECRET: ${SIGNING_KEYS_SECRET:?set SIGNING_KEYS_SECRET}
+  STUDIO_URL: https://${STUDIO_DOMAIN:?set STUDIO_DOMAIN}
+  RUNTIME_BASE_URL: https://${RUNTIME_DOMAIN:?set RUNTIME_DOMAIN}
+  CAPI_APP_URL: https://${CAPI_DOMAIN:?set CAPI_DOMAIN}
+  COOKIE_SECURE: 'true'
+  # Caddy is the one proxy in front of the API.
+  TRUST_PROXY_HOPS: '1'
+  ALLOW_SIGNUP: ${ALLOW_SIGNUP:-false}
+  FILES_DIR: /data/files
+
+services:
+  # Writes the replica set key file once (members of a replica set with passwords need one).
+  mongo-keyfile:
+    image: mongo:8.0
+    entrypoint: ['sh', '-c']
+    command:
+      - test -s /key/keyfile || head -c 756 /dev/urandom | base64 -w0 > /key/keyfile; chmod 400 /key/keyfile; chown 999:999 /key/keyfile
+    volumes: [mongokey:/key]
+    restart: 'no'
+
+  # A one-member replica set (Prisma needs one for transactions) with a root user and the app user,
+  # both created on the first start only (an empty volume). The health check starts the replica set.
+  mongo:
+    <<: *restart
+    image: mongo:8.0
+    command: ['--replSet', 'rs0', '--bind_ip_all', '--keyFile', '/key/keyfile']
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:?set MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD}
+      MONGO_APP_USER: ${MONGO_APP_USER:?set MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD}
+      # mongod 8.0 will not start on Linux 6.19+/7.x kernels otherwise (SERVER-121912).
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
+    volumes:
+      - mongodata:/data/db
+      - mongokey:/key:ro
+      - ./infra/mongo/create-app-user.sh:/docker-entrypoint-initdb.d/create-app-user.sh:ro
+    depends_on:
+      mongo-keyfile: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mongosh --quiet -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "try { rs.status().ok } catch (e) { rs.initiate({ _id: ''rs0'', members: [{ _id: 0, host: ''mongo:27017'' }] }).ok }"',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+  # Creates the collections and indexes, then exits. Runs on every `up`, before the API starts.
+  migrate:
+    build: { context: ., target: migrate }
+    image: sampcode-migrate:${TAG:-latest}
+    env_file: &env-file ['${ENV_FILE:-.env.production}']
+    environment: *api-env
+    depends_on:
+      mongo: { condition: service_healthy }
+    restart: 'no'
+
+  api:
+    <<: *restart
+    build: { context: ., target: api }
+    image: sampcode-api:${TAG:-latest}
+    env_file: *env-file
+    environment:
+      <<: *api-env
+      # The worker service below runs jobs, callbacks and webhooks.
+      JOB_WORKER: 'off'
+      CALLBACK_WORKER: 'off'
+    volumes: [files:/data/files]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    <<: *restart
+    build: { context: ., target: worker }
+    image: sampcode-worker:${TAG:-latest}
+    env_file: *env-file
+    environment: *api-env
+    volumes: [files:/data/files]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  studio:
+    <<: *restart
+    build: { context: ., target: studio }
+    image: sampcode-studio:${TAG:-latest}
+    depends_on:
+      api: { condition: service_healthy }
+
+  runtime:
+    <<: *restart
+    build: { context: ., target: runtime }
+    image: sampcode-runtime:${TAG:-latest}
+    depends_on:
+      api: { condition: service_healthy }
+
+  capi:
+    <<: *restart
+    build: { context: ., target: capi }
+    image: sampcode-capi:${TAG:-latest}
+    depends_on:
+      api: { condition: service_healthy }
+
+  caddy:
+    <<: *restart
+    image: caddy:2.10-alpine
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      STUDIO_DOMAIN: ${STUDIO_DOMAIN:?set STUDIO_DOMAIN}
+      RUNTIME_DOMAIN: ${RUNTIME_DOMAIN:?set RUNTIME_DOMAIN}
+      CAPI_DOMAIN: ${CAPI_DOMAIN:?set CAPI_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [studio, runtime, capi]
+
+  # Database backups: a mongodump archive every BACKUP_INTERVAL_HOURS, the newest BACKUP_KEEP kept
+  # in ./backups on the server. Copy that folder off the server too (docs/operations/database.md).
+  backup:
+    <<: *restart
+    image: mongo:8.0
+    entrypoint: ['bash', '-c']
+    command:
+      - while true; do /scripts/backup.sh /backups || echo "backup failed"; sleep $$(( $${BACKUP_INTERVAL_HOURS} * 3600 )); done
+    environment:
+      DATABASE_URL: *db-url
+      KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+    volumes:
+      - ./infra/scripts:/scripts:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      mongo: { condition: service_healthy }
+
+volumes:
+  mongodata:
+  mongokey:
+  files:
+  caddydata:
+  caddyconfig:

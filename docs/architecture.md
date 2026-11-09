@@ -218,17 +218,17 @@ Details: [modules/rich-media.md](modules/rich-media.md).
   just-in-time roles and enforcement; requests are stored in `SsoRequest` and answered once.
 - **Billing** (`BillingService`, optional): Stripe Checkout and portal; signed webhooks re-read the
   subscription and set `Tenant.plan`. [Guide](modules/billing.md)
-- **AWS** in `infra/terraform` with `infra/scripts/deploy-aws.sh`; the API builds `DATABASE_URL`
-  from the database secret (MongoDB Atlas user) and trusts viewer address and country only from CloudFront
-  (`EDGE_SHARED_SECRET`). [Guide](../infra/terraform/README.md)
+- **Deployment** (since 2026-11-09, ADR 0042): `docker-compose.prod.yml` on one server, Caddy for
+  HTTPS in front, MongoDB as a replica set with passwords, a backup service. The AWS Terraform of this
+  milestone was removed. The API still trusts viewer address and country only from an edge that sends
+  `EDGE_SHARED_SECRET`, for a CDN put in front later. [Guide](operations/go-live.md#deploying-with-docker-compose)
 - **PROJEXA check** `scripts/projexa-check.mjs`. [ADR 0019](adr/0019-production-readiness.md)
 
 ## Edge protection, scaling and backups (Milestone 14)
 
-- **AWS WAF** in front of CloudFront (runtime, CAPI app) and the load balancer (studio, API). Managed
-  rules start in count mode (`waf_mode = "count"`); the per-address rate rule always blocks.
-- **Autoscaling** owns the API and studio task counts; Atlas backups cover the database and **AWS Backup** the files bucket.
-  [ADR 0020](adr/0020-edge-protection-scaling-backups.md), [go-live checklist](operations/go-live.md)
+- Built on AWS (WAF, autoscaling, AWS Backup; ADR 0020) and removed with the Terraform on 2026-11-09
+  (ADR 0042). Today: the API's own rate limits, one server, and the compose `backup` service
+  ([database.md](operations/database.md)). [Go-live checklist](operations/go-live.md)
 
 ## Weighting (Milestone 15)
 
@@ -291,6 +291,9 @@ Each is an interface with one first provider, off by default, tested against a l
 | #58 | MongoDB Atlas in Terraform, copy from PostgreSQL                                                       | [0040](adr/0040-mongodb.md)                          |
 | #60 | Plain Express instead of NestJS                                                                        | [0041](adr/0041-express.md)                          |
 | #61 | Docs for Express and Atlas                                                                             | —                                                    |
+| #62 | CI: MongoDB 8.0 on Linux 6.19+ kernels (`GLIBC_TUNABLES`)                                              | —                                                    |
+| #64 | #60 and #61 into `main`                                                                                | —                                                    |
+| —   | Production on Docker Compose with Caddy; Terraform and Atlas removed                                   | [0042](adr/0042-docker-compose-deployment.md)        |
 
 ## Decisions, contracts and operations
 
@@ -342,8 +345,8 @@ Each is an interface with one first provider, off by default, tested against a l
 - SSO (OpenID Connect and SAML) has been tested against test providers, not a real one; SAML has
   no single logout or encrypted assertions. SCIM covers users, not groups. Billing (Stripe) is
   tested against a fake Stripe only.
-- The AWS Terraform and release script are validated and plan-tested with a mocked provider, not
-  applied to an account yet. PROJEXA has been checked against its code, not a deployed PROJEXA.
+- The production Docker Compose file is booted in CI (HTTPS with local certificates, a backup and
+  restore), not yet on a real server with real domains. PROJEXA has been checked against its code, not a deployed PROJEXA.
 - Webhooks are organization-wide (no per-project webhooks). Deliveries are kept for
   `WEBHOOK_DELIVERY_RETENTION_DAYS` (30).
 - Re-entry with the same UID resumes an unfinished interview. With unsigned links, anyone who knows a

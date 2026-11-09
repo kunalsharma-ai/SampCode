@@ -59,7 +59,7 @@ SampCode is a survey programming, testing, hosting and fieldwork platform for ma
 | Files             | local disk (`FILES_DIR`) or AWS S3 (`@aws-sdk/client-s3`)                                                                                                                      |
 | Excel, Word, SAML | exceljs, mammoth (Word to text), `@node-saml/node-saml`, `jose` (OIDC tokens)                                                                                                  |
 | Tests             | Vitest 3 (unit and API tests with Supertest), Playwright 1.63 (end-to-end)                                                                                                     |
-| Infrastructure    | Docker (`Dockerfile`, `docker-compose.yml`), nginx, Terraform for AWS (`infra/terraform`)                                                                                      |
+| Infrastructure    | Docker (`Dockerfile`, `docker-compose.yml` locally, `docker-compose.prod.yml` in production), nginx, Caddy (HTTPS)                                                             |
 
 ### Third-party services (all optional, all off by default)
 

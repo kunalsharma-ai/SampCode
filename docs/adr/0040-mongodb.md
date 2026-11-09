@@ -51,5 +51,5 @@ SUPPLY360 do not change.
   (members are listed by `lastSeenAt` descending, which puts never-seen members last on both).
 - Nested `include`s of respondent data are not filtered by `forTenant`, as RLS would have done;
   every studio query also filters `tenantId` itself (the first line of defence, unchanged).
-- **Not changed yet:** `infra/terraform` still provisions RDS PostgreSQL. Moving AWS to MongoDB Atlas
-  or Amazon DocumentDB (with transactions) is a separate change before the next AWS release.
+- **Production:** MongoDB runs in the Docker Compose deployment (ADR 0042); the AWS Terraform, which
+  briefly provisioned MongoDB Atlas (#58), was removed.

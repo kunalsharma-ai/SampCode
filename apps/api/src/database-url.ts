@@ -1,8 +1,8 @@
 /**
- * Builds DATABASE_URL from its parts when it is not set (Milestone 13). On AWS the database password
- * lives in a managed secret and reaches the task as DB_USER and DB_PASSWORD, so no one has to
- * copy it into a connection string. Imported first by every entry point (API, worker, CLI).
- * DB_SCHEME=mongodb+srv (MongoDB Atlas, set by infra/terraform/ecs.tf) uses the cluster's DNS seed list:
+ * Builds DATABASE_URL from its parts when it is not set (Milestone 13), so a password that comes from
+ * a secret store as DB_USER and DB_PASSWORD never has to be copied into a connection string.
+ * Imported first by every entry point (API, worker, CLI).
+ * DB_SCHEME=mongodb+srv (a hosted cluster with a DNS seed list, such as MongoDB Atlas) uses that list:
  * no port, TLS on, and the replica set and auth source come from DNS.
  */
 export function databaseUrlFromParts(env: NodeJS.ProcessEnv): string | undefined {

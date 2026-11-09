@@ -146,7 +146,7 @@ export function createApp(options: CreateAppOptions = {}): ApiApp {
   return api;
 }
 
-/** Stops cleanly on SIGTERM / SIGINT (ECS sends SIGTERM before it stops a task). */
+/** Stops cleanly on SIGTERM / SIGINT (docker stop sends SIGTERM first). */
 export function closeOnSignals(app: { close(): Promise<void> }, logger: Logger) {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => {

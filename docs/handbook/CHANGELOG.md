@@ -7,7 +7,29 @@ for most, a module guide in [docs/modules/](../modules/).
 The format follows [Keep a Changelog](https://keepachangelog.com/): newest first, grouped by
 release. SampCode (called ZAPX until 2026-11-06) has no version numbers or git tags yet, so entries are grouped by milestone or PR.
 
-## Express and MongoDB Atlas (opened 2026-11-09, PRs #58, #60, #61, not merged yet)
+## Docker Compose deployment (opened 2026-11-09, not merged yet)
+
+### Added
+
+- `docker-compose.prod.yml` and `.env.production.example`: production on one server
+  ([ADR 0042](../adr/0042-docker-compose-deployment.md)). Caddy (`infra/caddy/Caddyfile`) is the only
+  published service and gets HTTPS certificates for the three domains; MongoDB runs as a replica set with
+  a key file, a root user and a `readWrite` app user (`infra/mongo/create-app-user.sh`); a `backup`
+  service writes a `mongodump` archive every 24 hours.
+- The `deploy-smoke` workflow boots that file over HTTPS in CI and takes and restores a backup;
+  `scripts/check.sh` validates it with `docker compose config`.
+
+### Removed
+
+- `infra/terraform` (AWS and MongoDB Atlas) and `infra/scripts/deploy-aws.sh`, with the Terraform step of
+  `scripts/check.sh` and its ignore rules.
+
+## CI fix (merged 2026-11-09, PR #62)
+
+- MongoDB 8.0 refused to start on GitHub's Linux 6.19+ runners (SERVER-121912);
+  `GLIBC_TUNABLES=glibc.pthread.rseq=1` on the container fixes it, in CI and both compose files.
+
+## Express and MongoDB Atlas (merged 2026-11-09, PRs #58, #60, #61 via #64)
 
 ### Changed
 
@@ -226,5 +248,5 @@ released, move the entries under a heading with the date (and a version, if vers
 ```
 
 Recommended (not in place yet): tag releases (`git tag release-YYYY-MM-DD`) when deploying with
-`infra/scripts/deploy-aws.sh`, so rollback has a named target (see
+`docker-compose.prod.yml`, so rollback has a named target (see
 [DEPLOYMENT.md](DEPLOYMENT.md#5-rolling-back)).

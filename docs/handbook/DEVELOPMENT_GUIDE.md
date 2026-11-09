@@ -8,13 +8,12 @@ the repository's `package.json` files or scripts; they were run on 2026-11-05 on
 
 ### What you need
 
-| Tool      | Version                                       | Check                                     |
-| --------- | --------------------------------------------- | ----------------------------------------- |
-| Node.js   | 26 LTS (`engines.node >= 26`, `.nvmrc`)       | `node -v`                                 |
-| pnpm      | 10.28.0 (`packageManager`)                    | `pnpm -v` (`corepack enable` installs it) |
-| MongoDB   | 7 or later, as a replica set                  | `mongod --version`, or use Docker         |
-| Docker    | optional, for the full stack and image builds | `docker info`                             |
-| Terraform | optional, only for `infra/terraform` checks   | `terraform -version`                      |
+| Tool    | Version                                       | Check                                     |
+| ------- | --------------------------------------------- | ----------------------------------------- |
+| Node.js | 26 LTS (`engines.node >= 26`, `.nvmrc`)       | `node -v`                                 |
+| pnpm    | 10.28.0 (`packageManager`)                    | `pnpm -v` (`corepack enable` installs it) |
+| MongoDB | 7 or later, as a replica set                  | `mongod --version`, or use Docker         |
+| Docker  | optional, for the full stack and image builds | `docker info`                             |
 
 ### Step by step
 
@@ -89,22 +88,22 @@ publish, set it live, and create a link under **Distribution**. Open the link to
 
 ## 2. Everyday commands
 
-| Command                                                     | What it does                                                                                                                                    |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------ | ------------- |
-| `pnpm build`                                                | builds all packages and apps with Turborepo (cached)                                                                                            |
-| `pnpm typecheck`                                            | TypeScript checks everywhere                                                                                                                    |
-| `pnpm lint`                                                 | ESLint (`eslint.config.mjs`)                                                                                                                    |
-| `pnpm format` / `pnpm format:check`                         | Prettier write / check (also checks Markdown)                                                                                                   |
-| `pnpm test`                                                 | unit tests in packages + API tests (needs the database in `.env`)                                                                               |
-| `pnpm --filter @zapx/api test -- test/m6.test.ts`           | one API test file                                                                                                                               |
-| `pnpm --filter @zapx/logic-engine test`                     | one package's tests                                                                                                                             |
-| `set -a; . ./.env; set +a; pnpm e2e`                        | Playwright browser tests (build first; it starts the apps itself)                                                                               |
-| `pnpm check`                                                | the full quality gate: install, secret scan, format, lint, build, typecheck, migrate, tests, audit, Terraform (if installed), e2e, Docker build |
-| `pnpm check --quick`                                        | format, lint, build, typecheck and tests only                                                                                                   |
-| `pnpm check --no-e2e` / `--no-docker`                       | skip those steps                                                                                                                                |
-| `pnpm secrets:scan`                                         | look for secrets in tracked files                                                                                                               |
-| `pnpm --filter @zapx/db build && pnpm db:migrate`           | after schema changes: regenerate the client, create new collections and indexes                                                                 |
-| `node apps/api/dist/cli/set-plan.js <org id or email> <free | team                                                                                                                                            | business | enterprise>` | change a plan |
+| Command                                                     | What it does                                                                                                                                                             |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------ | ------------- |
+| `pnpm build`                                                | builds all packages and apps with Turborepo (cached)                                                                                                                     |
+| `pnpm typecheck`                                            | TypeScript checks everywhere                                                                                                                                             |
+| `pnpm lint`                                                 | ESLint (`eslint.config.mjs`)                                                                                                                                             |
+| `pnpm format` / `pnpm format:check`                         | Prettier write / check (also checks Markdown)                                                                                                                            |
+| `pnpm test`                                                 | unit tests in packages + API tests (needs the database in `.env`)                                                                                                        |
+| `pnpm --filter @zapx/api test -- test/m6.test.ts`           | one API test file                                                                                                                                                        |
+| `pnpm --filter @zapx/logic-engine test`                     | one package's tests                                                                                                                                                      |
+| `set -a; . ./.env; set +a; pnpm e2e`                        | Playwright browser tests (build first; it starts the apps itself)                                                                                                        |
+| `pnpm check`                                                | the full quality gate: install, secret scan, format, lint, build, typecheck, migrate, tests, audit, production compose check (if Docker is installed), e2e, Docker build |
+| `pnpm check --quick`                                        | format, lint, build, typecheck and tests only                                                                                                                            |
+| `pnpm check --no-e2e` / `--no-docker`                       | skip those steps                                                                                                                                                         |
+| `pnpm secrets:scan`                                         | look for secrets in tracked files                                                                                                                                        |
+| `pnpm --filter @zapx/db build && pnpm db:migrate`           | after schema changes: regenerate the client, create new collections and indexes                                                                                          |
+| `node apps/api/dist/cli/set-plan.js <org id or email> <free | team                                                                                                                                                                     | business | enterprise>` | change a plan |
 
 Run `pnpm check` before merging. GitHub Actions does not run on this account, so this is the only
 gate ([ADR 0009](../adr/0009-local-quality-gates.md)).
@@ -317,7 +316,7 @@ Pure packages have fast unit tests next to the code; write the test first, then 
 | Modify API                                     | the controller and service in `apps/api/src/<module>/`, callers in `apps/studio`, `apps/runtime`, `apps/capi`, `docs/api/openapi.yaml` for partner routes                                   | handler, schema, callers, tests                                                                                |
 | Fix frontend issue                             | the page in `apps/studio/app/`, the component in `apps/studio/components/`, `packages/survey-renderer/src/index.tsx` (respondent screens), `apps/runtime/src/App.tsx`                       | the component; check the browser console and the network tab for the API answer                                |
 | Change business logic                          | `packages/logic-engine`, `packages/redirect-core`, `packages/quality-core`, `packages/analysis-core`, or the module service in `apps/api/src`                                               | the pure function first (with its unit test), then the service                                                 |
-| Add a setting                                  | `apps/api/src/config.ts`, `.env.example`, `infra/terraform/ecs.tf` / `variables.tf`                                                                                                         | Zod field with a safe default                                                                                  |
+| Add a setting                                  | `apps/api/src/config.ts`, `.env.example`, and `.env.production.example` if production needs it                                                                                              | Zod field with a safe default                                                                                  |
 | Change respondent redirect                     | vendor in the studio, or `packages/redirect-core`, `apps/api/src/integrations/integration-config.ts`                                                                                        | URLs/status words (data), or precedence logic (code)                                                           |
 | Change an email/SMS                            | `apps/api/src/distribution/distribution.service.ts`, `mailer.ts`, `sms.ts`                                                                                                                  | template rendering and sending                                                                                 |
 | Turn a feature on or off for a plan _(PR #41)_ | super admin console (`/super-admin/plans`, `/super-admin/organizations`), `apps/api/src/super-admin/features.ts`, `apps/mobile/src/lib/features.ts`                                         | plan features (data) or the route map and catalog (code)                                                       |

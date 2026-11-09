@@ -1,0 +1,48 @@
+# Public entry point for a Docker Compose deployment (docker-compose.prod.yml).
+# Caddy gets and renews HTTPS certificates for the three domains by itself (Let's Encrypt), so
+# ports 80 and 443 must reach this machine and each domain's DNS must point at it.
+#
+# Every /api/ request goes straight to the API, so the API sees one proxy in front of it
+# (TRUST_PROXY_HOPS=1) whichever app the request came from.
+{
+	email {$ACME_EMAIL}
+}
+
+(api) {
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+}
+
+# Studio (CRM): researchers, admins, the super admin console.
+{$STUDIO_DOMAIN} {
+	encode zstd gzip
+	import api
+	handle {
+		reverse_proxy studio:3000
+	}
+}
+
+# Respondent runtime: the survey link respondents open. The same 1 MB request limit as before.
+{$RUNTIME_DOMAIN} {
+	encode zstd gzip
+	request_body /api/* {
+		max_size 1MB
+	}
+	import api
+	handle {
+		reverse_proxy runtime:80
+	}
+}
+
+# Offline interviewer app (CAPI).
+{$CAPI_DOMAIN} {
+	encode zstd gzip
+	request_body /api/* {
+		max_size 1MB
+	}
+	import api
+	handle {
+		reverse_proxy capi:80
+	}
+}

@@ -96,10 +96,11 @@ in `pnpm-workspace.yaml`.
 - **Edge trust:** with `EDGE_SHARED_SECRET` set, the viewer address and country headers are dropped
   from any request that does not carry the CDN's secret (constant-time comparison), so they cannot
   be forged by calling the API directly. The ALB forwards the respondent origin only with the header.
-- **AWS secrets** live in Secrets Manager: the app secret (Terraform creates it but never holds its
-  values) and `zapx-<env>/database` with the MongoDB Atlas user, whose generated password Terraform
-  writes there. The Terraform state therefore holds the database password and `edge_shared_secret`
-  (which CloudFront needs), so treat the state as secret.
+- **Server secrets** (Docker Compose, ADR 0042) live in `.env.production` on the server, which git
+  ignores: the three app secrets and the two MongoDB passwords. Keep it `chmod 600`, readable only
+  by the deploying user, and never copy it into an image or a backup that leaves the server
+  unencrypted. MongoDB requires a password, the apps use a user limited to `readWrite` on `zapx`, and
+  only Caddy (80, 443) is published on the host.
 
 ## Third-party lookups (Milestone 16 onwards)
 
@@ -133,7 +134,7 @@ Details and reasons: [ADR 0026](adr/0026-security-hardening.md).
   Permissions-Policy from Next.js, nginx (`infra/nginx/*-headers.conf`) and CloudFront response
   headers policies. The runtime may be framed by customers' sites; the studio and CAPI app may not.
 - **Secrets in git:** `scripts/secret-scan.mjs` in `pnpm check` and the pre-commit and pre-push
-  hooks; `.gitignore` covers env files, keys and Terraform state.
+  hooks; `.gitignore` covers env files (including `.env.production`), keys and the `backups/` folder; the secret scan still refuses Terraform state and variable files.
 
 ## Reporting
 

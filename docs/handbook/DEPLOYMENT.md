@@ -4,7 +4,7 @@ This file covers how SampCode is tested, built, released, rolled back, backed up
 what to do regularly to keep it healthy. Every section separates **Implemented** (exists in the
 repository and was checked) from **Recommended** (not built yet).
 
-The deeper guides it builds on: [infra/terraform/README.md](../../infra/terraform/README.md),
+The deeper guides it builds on: [ADR 0042 Docker Compose deployment](../adr/0042-docker-compose-deployment.md),
 [docs/operations/go-live.md](../operations/go-live.md),
 [docs/operations/database.md](../operations/database.md) and
 [ADR 0009 local quality gates](../adr/0009-local-quality-gates.md).
@@ -19,7 +19,7 @@ The deeper guides it builds on: [infra/terraform/README.md](../../infra/terrafor
 | API integration tests | Vitest + a real database | `apps/api/test/*.test.ts` (one file per milestone or phase, 31 files)                                                                                  | `pnpm --filter @zapx/api test` (needs MongoDB at `DATABASE_URL`)                                     |
 | End-to-end (browser)  | Playwright               | `e2e/tests/*.spec.ts` (28 files: `milestone*.spec.ts`, `blueprint*.spec.ts`, `quantum`, `neon`, `eyetracking`, `super-admin`, `security-fixes`)        | `pnpm e2e` (builds must exist; starts API, studio, runtime and CAPI from `e2e/playwright.config.ts`) |
 | Mobile app _(PR #40)_ | Vitest, `tsc`            | `apps/mobile/test/*.test.ts` (API client, logic, entitlements; a test checks the feature keys match the server)                                        | `cd apps/mobile && npm ci && npm run typecheck && npm test` (inside `pnpm check`)                    |
-| Infrastructure        | `terraform test`         | `infra/terraform/tests/plan.tftest.hcl` (mocked provider)                                                                                              | inside `pnpm check` when Terraform is installed                                                      |
+| Deployment            | `docker compose`         | `docker-compose.prod.yml`; the `deploy-smoke` workflow boots it over HTTPS and restores a backup                                                       | `docker compose config` inside `pnpm check` when Docker is installed; the workflow in CI             |
 | Static checks         | Prettier, ESLint, `tsc`  | `.prettierrc`, `eslint.config.*`, every `tsconfig.json`                                                                                                | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`                                                   |
 | Secret scan           | own script               | `scripts/secret-scan.mjs`, also in the pre-commit hook `.githooks/`                                                                                    | `pnpm secrets:scan`                                                                                  |
 | Dependency audit      | `pnpm audit`             | accepted exceptions in [docs/security.md](../security.md)                                                                                              | inside full `pnpm check`                                                                             |
@@ -42,7 +42,7 @@ your machine is the gate.
 2. Add or update a test in the same area: a package `*.test.ts`, an API `apps/api/test/*.test.ts`
    (they start the real Express app with `createApp()` against a real database), or a Playwright spec for a screen flow.
 3. Before pushing: `pnpm check --quick` (format, lint, build, typecheck, database indexes, all tests).
-4. Before a release: full `pnpm check` (adds audit, Terraform, e2e and Docker images).
+4. Before a release: full `pnpm check` (adds audit, the production compose check, e2e and Docker images).
 
 ### Recommended (not implemented)
 
@@ -71,12 +71,11 @@ the unprivileged `node` user; `api` has a health check on `/api/health`; `migrat
 `apps/api/dist/cli/migrate.js` and exits; `worker` runs `apps/api/dist/worker.js`; `runtime` and
 `capi` are static builds served by `nginx:1.27-alpine` with the headers in `infra/nginx/`.
 
-## 3. Running a full stack with Docker (single server)
+## 3. Running a full stack locally with Docker
 
 ### Implemented
 
 ```bash
-cp .env.example .env          # then set real secrets for anything beyond a laptop
 docker compose up -d --build  # mongo, migrate (once), api, worker, studio, runtime, capi
 docker compose ps
 curl -s localhost:4000/api/health
@@ -84,75 +83,70 @@ curl -s localhost:4000/api/health
 
 Ports: studio 3000, API 4000, runtime 5173, CAPI 5174, MongoDB 27017. In this setup the `api`
 service has `JOB_WORKER=off` and `CALLBACK_WORKER=off` and the `worker` service does the background
-work.
+work. `docker-compose.yml` uses example secrets and opens every port: it is for development and
+evaluation only. Production is section 4.
 
-**Needs Verification:** `docker-compose.yml` is written for development and evaluation. Using it for
-production on one server needs at least `NODE_ENV=production`, `COOKIE_SECURE=true`, a real
-`JWT_SECRET` and `SECRETS_KEY`, HTTPS in front (a reverse proxy) and a database backup job. That
-path is not documented in the repository; AWS is the documented production target.
+## 4. Releasing to production (Docker Compose on one server)
 
-## 4. Releasing to AWS
+### Implemented
 
-### Implemented (written, validated, not yet applied)
+`docker-compose.prod.yml` ([ADR 0042](../adr/0042-docker-compose-deployment.md)) runs everything on one
+Linux server from the same images:
 
-- **Infrastructure:** `infra/terraform/` creates VPC, ALB, ECS Fargate services (API ×2, worker ×1,
-  studio ×2, with autoscaling for API and studio), a MongoDB Atlas cluster reached over AWS
-  PrivateLink (three-node replica set, point-in-time restore, daily snapshots), S3 buckets, CloudFront for the runtime and CAPI app, WAF (count mode first), KMS,
-  Secrets Manager, AWS Backup (35 days), CloudWatch logs and alarms to SNS.
-- **Release script:** `infra/scripts/deploy-aws.sh`.
+```mermaid
+flowchart LR
+  I((Internet)) -->|80, 443| C[caddy: HTTPS]
+  C -->|studio domain| S[studio]
+  C -->|survey domain| R[runtime]
+  C -->|interviewer domain| P[capi]
+  C -->|/api/ on every domain| A[api]
+  A --> M[(mongo rs0)]
+  W[worker] --> M
+  G[migrate: once per up] --> M
+  B[backup: mongodump every 24 h] --> M
+```
 
-The Terraform passes `terraform validate` and mocked plan tests (the MongoDB Atlas part is new and
-still needs `terraform validate` where the `mongodbatlas` provider can be downloaded), but **has never been applied to a
-real AWS account**, and the release script has **never been run**. Both say so in their own headers.
-Follow [docs/operations/go-live.md](../operations/go-live.md) in order and do everything on staging
-first.
+- Only Caddy is published (80 and 443); it gets Let's Encrypt certificates for `STUDIO_DOMAIN`,
+  `RUNTIME_DOMAIN` and `CAPI_DOMAIN` (`infra/caddy/Caddyfile`).
+- MongoDB: one-member replica set with a key file, a root user and an app user (`readWrite` on `zapx`),
+  not published on the host.
+- Settings: `.env.production` (from `.env.production.example`). The file refuses to load without the
+  domains, the three secrets and the MongoDB passwords.
+- Checked in CI by the `deploy-smoke` workflow (boots it over HTTPS with Caddy's local certificates,
+  takes and restores a backup), and by `docker compose config` in `scripts/check.sh`. **Not yet run on
+  a real server with real domains.**
 
-### First-time setup (summary of go-live.md)
+### First-time setup
 
-1. Terraform state bucket, ACM certificates (one in us-east-1 for CloudFront), DNS validation.
-2. `terraform apply` with `waf_mode = "count"` (`infra/terraform/<env>.tfvars`).
-3. Put the app secret JSON in Secrets Manager. Every key in `app_secret_keys`
-   (`infra/terraform/variables.tf`) must be present, empty if unused; `JWT_SECRET`, `SECRETS_KEY`
-   and `SIGNING_KEYS_SECRET` (PR #45) must be your own, different random values. The example JSON in the
-   Terraform README lists them all (fixed in PR #36; before it, `TWILIO_AUTH_TOKEN`
-   and `SENDGRID_API_KEY` were missing); see [CONFIGURATION.md](CONFIGURATION.md#gaps-found).
-4. First release (below), then create the first organization with a temporary
-   `ALLOW_SIGNUP = "true"` and remove it again.
+Follow [docs/operations/go-live.md](../operations/go-live.md#deploying-with-docker-compose): a server
+with Docker, DNS for the three domains, `.env.production`, then
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Create the first organization with a temporary `ALLOW_SIGNUP=true` (then back to `false` and `up -d`).
 
 ### Each release
 
 ```bash
-git status                                  # must be clean: the image tag is the commit
-pnpm check                                  # all gates green first
-ENVIRONMENT=staging infra/scripts/deploy-aws.sh          # tag = current commit
-ENVIRONMENT=staging infra/scripts/deploy-aws.sh <tag>    # or an explicit tag
+pnpm check                                  # all gates green first (on your machine)
+# on the server:
+git pull
+TAG=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
-What the script does, in order:
-
-```mermaid
-flowchart TD
-  A[Clean git tree?] -->|no| X[Stop]
-  A -->|yes| B[Build and push api and studio images to ECR]
-  B --> C[Point migrate task at new image and run it]
-  C -->|exit code not 0| Y[Stop: services unchanged]
-  C -->|0| D[terraform apply with image_tag]
-  D --> E[Wait for api, worker, studio to be stable]
-  E --> F[Build runtime and CAPI, sync to S3]
-  F --> G[Invalidate index.html, sw.js, manifest on CloudFront]
-```
-
-Order matters: the index sync (`migrate` task) runs **before** new code starts, so every schema change
-must work with the code that is still running (add fields as optional first, remove old ones in a later
-release; a new unique rule must hold for the data already stored).
+Compose rebuilds the images, runs `migrate` (the index sync) and only then replaces the API and worker.
+The index sync runs **before** new code starts, so every schema change must work with the code that is
+still running (add fields as optional first, remove old ones in a later release; a new unique rule must
+hold for the data already stored). The API is down for the few seconds its container restarts.
 
 ### Checks after a release
 
 ```bash
 curl -s https://<studio-domain>/api/health                  # {"ok":true}
-aws ecs describe-services --cluster <cluster> --services api worker studio \
-  --query 'services[].{name:serviceName,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}'
-aws logs tail /zapx/<env>/api --since 15m
+docker compose -f docker-compose.prod.yml --env-file .env.production ps                  # every service running, api healthy, migrate exited 0
+docker compose -f docker-compose.prod.yml --env-file .env.production logs --since 15m api worker
 ```
 
 Then sign in to the studio, open one survey, and open one test link in the runtime.
@@ -181,56 +175,54 @@ owner's store accounts.
 
 ### Implemented
 
-- **Automatic:** ECS replaces new tasks that fail their health check and keeps the old ones
-  (Terraform README, "Releasing").
-- **Index sync failed:** the script stops before changing services, so nothing needs rolling back. The
-  usual cause is existing data that breaks a new unique rule (see
+- **Index sync failed:** `migrate` exits non-zero, so compose does not start the new API and worker;
+  the old containers keep running. The usual cause is existing data that breaks a new unique rule (see
   [TROUBLESHOOTING.md 5b](TROUBLESHOOTING.md#5b-unique-rule-not-enforced-or-index--already-exists-with-different-options)).
+- **Restarts:** every long-running service has `restart: unless-stopped`; Docker restarts a crashed
+  container and starts the stack again after a server reboot.
 
 ### Manual rollback to an earlier version
 
-**Needs Verification** (derived from the script, not tested):
-
 ```bash
 git checkout <previous-good-commit>          # so the runtime and CAPI builds match too
-ENVIRONMENT=production infra/scripts/deploy-aws.sh "$(git rev-parse --short=12 HEAD)"
+TAG=$(git rev-parse --short HEAD) docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
-The script rebuilds and pushes images with that tag, runs migrations (already applied, so nothing
-happens) and rolls the services back. **Data changes are not undone.** If a release changed
-documents in a way the old code cannot use, restore from backup or fix them with a forward script.
-Keep schema changes backward-compatible to avoid this.
+If the images for that tag are still on the server (`docker image ls 'sampcode-*'`), `up -d` without
+`--build` reuses them. **Data changes are not undone.** If a release changed documents in a way the old
+code cannot use, restore from backup or fix them with a forward script. Keep schema changes
+backward-compatible to avoid this.
 
 ### Recommended
 
-- Keep a short list of released tags (for example a `RELEASES.md` or git tags `release-<date>`), so
-  the previous good tag is known without searching.
-- Add a `--skip-build` option to the script to reuse an image already in ECR for a faster rollback.
+- Tag each release (`git tag release-<date>`), so the previous good commit is known without searching.
+- Keep the last few images (`docker image prune` only removes untagged ones).
 
 ## 6. Backup and restore
 
 ### Implemented
 
-| Environment        | How                                                                                                                                                        |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local / one server | `DATABASE_URL=... infra/scripts/backup.sh [dir]` writes `zapx-<UTC time>.archive.gz` (mongodump archive) and keeps the newest `KEEP` (default 14).         |
-| Restore            | `DATABASE_URL=<empty-db-url> infra/scripts/restore.sh <file>.archive.gz` (mongorestore, stops on first error).                                             |
-| AWS                | MongoDB Atlas continuous backup with point-in-time restore and daily snapshots (`infra/terraform/database.tf`); AWS Backup for the files bucket (35 days). |
+| What               | How                                                                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Production         | The `backup` service: `infra/scripts/backup.sh` every `BACKUP_INTERVAL_HOURS` (24) into `BACKUP_DIR` (`./backups`), keeps `BACKUP_KEEP` (14) |
+| Local / any server | `DATABASE_URL=... infra/scripts/backup.sh [dir]` writes `sampcode-<UTC time>.archive.gz` (mongodump archive)                                 |
+| Restore            | [docs/operations/database.md](../operations/database.md#backups-and-recovery), or `infra/scripts/restore.sh <file>` outside Docker           |
 
-Targets written in [docs/operations/database.md](../operations/database.md): RPO ≤ 5 minutes, RTO
-≤ 1 hour. They are targets, not measured values.
+Targets written in [docs/operations/database.md](../operations/database.md): RPO 24 hours with the
+daily backup, RTO ≤ 1 hour. They are targets, not measured values.
 
 Rules:
 
-- Restore **into a new, empty database**, never over the live one, then point a scratch stack at it.
-- Files (exports, media, CAPI photos) are not in the database backup. Locally they live in `FILES_DIR`
-  (default `.data/files`); copy that folder too. On AWS they are in S3, covered by AWS Backup.
+- The backups are on the same disk as the database: **copy `./backups` off the server every day**.
+- Files (exports, media, CAPI photos) are not in the database backup. In production they are in the
+  `files` Docker volume (or S3 with `FILE_STORE=s3`); back that up too (database.md shows how).
+- Practise restores on staging, not on the live database.
 
 Restore drill (local):
 
 ```bash
 DATABASE_URL='mongodb://localhost:27017/zapx_restore_test?directConnection=true' \
-  infra/scripts/restore.sh backups/zapx-<timestamp>.archive.gz
+  infra/scripts/restore.sh backups/sampcode-<timestamp>.archive.gz
 mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --eval 'db.Response.countDocuments()'
 mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --eval 'db.dropDatabase()'
 ```
@@ -238,8 +230,8 @@ mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --ev
 ### Recommended
 
 - Run the restore drill monthly and write the time it took (that is your measured RTO).
-- Cross-region backup copies (listed as "Not included yet" in the Terraform README).
-- Schedule `backup.sh` with cron if you run on one server.
+- Automate the off-server copy (a cron job with `rsync`, `rclone` or `aws s3 sync`) and alert when it
+  fails.
 
 ## 7. Production environment checklist
 
@@ -253,23 +245,21 @@ The API refuses to start in production without these (enforced in `apps/api/src/
 
 With PR #38 the provider keys can instead be entered after the first sign-in under Settings →
 Integrations (the operator organization's administrators or the super admin). With PR #41, make the
-first super admin right after the first release: `node apps/api/dist/cli/set-super-admin.js <email>`
-(run it as a one-off task, like the migration).
+first super admin right after the first release:
+`docker compose -f docker-compose.prod.yml --env-file .env.production exec api node apps/api/dist/cli/set-super-admin.js <email>`.
 
-Also set (not enforced, but needed): `STUDIO_URL` and `RUNTIME_BASE_URL`, `EDGE_SHARED_SECRET`
-behind CloudFront, `TRUST_PROXY_HOPS` for the load balancer, `ALLOW_SIGNUP=false`, and the provider
-keys you use. Full list: [CONFIGURATION.md](CONFIGURATION.md).
+`docker-compose.prod.yml` sets `NODE_ENV`, `COOKIE_SECURE`, the public URLs (from the domains) and
+`TRUST_PROXY_HOPS=1` (Caddy) itself, and defaults `ALLOW_SIGNUP` to false. Behind a CDN, also set
+`EDGE_SHARED_SECRET` and `TRUST_PROXY_HOPS=2`. Full list: [CONFIGURATION.md](CONFIGURATION.md).
 
 ## 8. Monitoring
 
 ### Implemented
 
-- **Health:** `GET /api/health` (database round trip). Used by the Docker `HEALTHCHECK`, the ECS
-  container health check and the ALB target group.
-- **Logs:** CloudWatch groups `/zapx/<env>/api`, `/worker`, `/studio`, `/migrate` (KMS-encrypted,
-  retention `log_retention_days`); WAF logs `aws-waf-logs-zapx-<env>-edge` (us-east-1) and `-alb`.
-- **Alarms** (`infra/terraform/monitoring.tf`, to an SNS topic): `api_5xx`, `api_unhealthy`
-  (unhealthy targets), `db_cpu`, `db_storage` (free storage low).
+- **Health:** `GET /api/health` (database round trip). Used by the Docker `HEALTHCHECK`; the studio,
+  runtime and CAPI app wait for it before they start.
+- **Logs:** `docker compose -f docker-compose.prod.yml --env-file .env.production logs`, kept by Docker (json-file, at most 5 × 20 MB per container).
+- **Alarms:** none are built in for the Docker Compose deployment (see Recommended).
 - **Super admin console** _(PR #41)_: activity across every organization (`/super-admin/activity`),
   each member's last request and client (`lastSeenAt`, `lastClient`), and platform automation runs.
 - **In the app:** the audit log (Settings → Audit), vendor callback and webhook delivery logs, job
@@ -277,13 +267,12 @@ keys you use. Full list: [CONFIGURATION.md](CONFIGURATION.md).
 
 ### Recommended
 
-- Subscribe a real email or chat channel to the SNS topic on day one (the alarms do nothing
-  otherwise).
+- An external uptime check on day one (for example UptimeRobot or Better Stack) on
+  `https://<studio-domain>/api/health` and the respondent runtime URL, to email or chat.
+- Disk space alerts on the server (MongoDB data, backups and Docker images share the disk).
 - Alarms for **worker health** (no `JobWorker` log line in 10 minutes, or `Job` rows stuck in
-  `QUEUED`), **dead callbacks** (`OutboundCallback.state = 'DEAD'`) and **API p95 latency** from the
-  ALB.
+  `QUEUED`) and **dead callbacks** (`OutboundCallback.state = 'DEAD'`).
 - Structured JSON logs with a request id, so one request can be followed across API and worker.
-- An external uptime check on the respondent runtime URL.
 
 ## 9. Maintenance recommendations
 
@@ -307,25 +296,25 @@ Regular tasks:
 | ------------- | --------------------------------------------------------------------------------------------------------- |
 | Every change  | `pnpm check --quick`; one PR per change; update the module guide or ADR when behaviour changes            |
 | Weekly        | Review open Dependabot PRs; `pnpm audit --prod`                                                           |
-| Weekly        | Look at `DEAD` callbacks, `FAILED` jobs and the WAF counts during fieldwork                               |
+| Weekly        | Look at `DEAD` callbacks, `FAILED` jobs and the server's free disk; check the off-server backup copies    |
 | Monthly       | Restore drill; review members and API keys (revoke unused); check AI spend against budgets                |
 | Quarterly     | Rotate `EDGE_SHARED_SECRET`, vendor and webhook secrets; review accepted advisories in `docs/security.md` |
-| Before launch | Raise `api_max_count`; check the WAF rate limit for shared interview-centre addresses                     |
+| Before launch | Size the server for the expected fieldwork; check rate limits for shared interview-centre addresses       |
 
 Improvements worth planning (details in [SECURITY_REVIEW.md](SECURITY_REVIEW.md)):
 
 1. ~~Merge or close the open stack~~: done, every PR through #46 is merged (2026-11-05 and 2026-11-06).
 2. **Done in PR #36:** the root `README.md`, `docs/architecture.md` and
    `go-live.md` now go past milestone 13; password change and reset exist; the vendor secret is
-   hidden from everyone but administrators; the AWS secret list matches its README.
+   hidden from everyone but administrators.
 3. **Seal the vendor shared secret at rest** with `SecretBox`, like the partner secret (needs a
    data migration).
 4. ~~Shared rate limiting~~: done in PR #45 (`THROTTLE_STORE=database`, the `RateLimitBucket` table).
 5. **Studio unit tests** and a coverage report (section 1).
 6. ~~Node 22 → newer LTS~~: done in PR #44 (Node 26 LTS; Dependabot #20–#25 closed as replaced).
 7. **Decide where provider keys live** now that PR #38 lets them be set in the CRM: either keep them
-   in Secrets Manager (`app_secret_keys`) or remove them there and enter them in Settings →
-   Integrations, but not half of each ([CONFIGURATION.md](CONFIGURATION.md)).
+   in `.env.production` or leave them out there and enter them in Settings → Integrations, but not
+   half of each ([CONFIGURATION.md](CONFIGURATION.md)).
 8. **Release the mobile app** to the stores once the owner's Expo, Google Play and Apple accounts
    exist (section 4b), and test it on real phones first.
 9. **Validate eye tracking on real webcams** before offering it to clients (PR #37 is marked
