@@ -27,7 +27,8 @@ signatures: [docs/modules/webhooks.md](../modules/webhooks.md). Redirect placeho
 
 ### Error responses
 
-All errors use NestJS's shape. Examples captured from the running API:
+All errors use the same JSON shape (`src/http/errors.ts`, kept from the NestJS version of the API).
+Examples captured from the running API:
 
 ```jsonc
 // 401 – no session
@@ -293,8 +294,8 @@ Events: `response.finished`, `response.review_decided`, `survey.published`, `sur
 
 ## 3. Endpoint reference
 
-How to read the tables: **Who can call it** comes from the `@Public()` / `@Roles()` decorators.
-"Signed-in (any role except INTERVIEWER)" means no `@Roles` is set, so admins, programmers and
+How to read the tables: **Who can call it** comes from the route's `public` / `roles` options
+(the route function at the end of each controller file). "Signed-in (any role except INTERVIEWER)" means no `roles` is set, so admins, programmers and
 viewers (and API keys) may call it, subject to project access. Some handlers also check the role
 inside the method; those are noted. "Public" routes that still verify something themselves: the
 vendor API (HMAC), SCIM (`ScimGuard` bearer token), Twilio webhooks (`x-twilio-signature`), Stripe

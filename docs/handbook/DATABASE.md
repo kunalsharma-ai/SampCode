@@ -179,10 +179,10 @@ field in two releases (stop using it, then clean up the documents).
 
 ## 8. Backup and restoration
 
-| Environment           | Backup                                                                                                                                     | Restore                                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| Local / single server | `DATABASE_URL=mongodb://... infra/scripts/backup.sh ./backups` (mongodump gzip archive, keeps the newest 14, `KEEP=` to change)            | `DATABASE_URL=mongodb://.../empty_db infra/scripts/restore.sh backups/zapx-<time>.archive.gz` into an **empty** database |
-| AWS (Terraform)       | `infra/terraform` still describes RDS PostgreSQL and has not moved to MongoDB yet (ADR 0040); use the managed MongoDB's continuous backups | restore to a **new** cluster or bucket, verify, then point a stack at it                                                 |
+| Environment           | Backup                                                                                                                                                                                    | Restore                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Local / single server | `DATABASE_URL=mongodb://... infra/scripts/backup.sh ./backups` (mongodump gzip archive, keeps the newest 14, `KEEP=` to change)                                                           | `DATABASE_URL=mongodb://.../empty_db infra/scripts/restore.sh backups/zapx-<time>.archive.gz` into an **empty** database |
+| AWS (Terraform)       | MongoDB Atlas continuous backup with point-in-time restore and daily snapshots (`db_backup_retention_days`, `infra/terraform/database.tf`); AWS Backup for the files bucket (`backup.tf`) | restore into a **new** Atlas cluster or bucket, verify, then point `DB_HOST` at it                                       |
 
 Files (exports, media, photos, recordings) are **not** in the database: back up `FILES_DIR` (local)
 or rely on the S3 bucket's versioning and AWS Backup. Test a restore regularly (quarterly is the
@@ -191,7 +191,7 @@ real account yet.
 
 ## 9. Every table and field
 
-Generated from `schema.prisma`. "Required" = the column is `NOT NULL`. Relation fields (the Prisma
+Generated from `schema.prisma`. "Required" = the field is always set. Relation fields (the Prisma
 objects that join tables) are summarised under "Relations".
 
 #### Tenant
@@ -367,7 +367,7 @@ A member with ASSIGNED project scope can see and work on this project (Milestone
 
 Relations: `projectId` → `Project.id`; `userId` → `User.id`.
 
-Indexes and constraints: `@@id([projectId, userId])`; `@@index([userId])`.
+Indexes and constraints: `id` (`_id`); `@@unique([projectId, userId])`; `@@index([userId])`.
 
 #### Survey
 
@@ -903,7 +903,7 @@ Indexes and constraints: `@@index([state, nextAttemptAt])`; `@@index([webhookId,
 
 #### Job
 
-Background job (Milestone 7): exports, QA runs, AI drafts. Run by the job worker, which claims rows with FOR UPDATE SKIP LOCKED and a lease, so several workers can run safely.
+Background job (Milestone 7): exports, QA runs, AI drafts. Run by the job worker, which claims rows with a conditional update and a lease, so several workers can run safely.
 
 | Field             | Type             | Required | Key / default            | Meaning                                                                                     |
 | ----------------- | ---------------- | -------- | ------------------------ | ------------------------------------------------------------------------------------------- |
@@ -1106,7 +1106,7 @@ Blueprint phase 2: how often each page of a least-fill block has been picked for
 | `pageId`   | `String` | yes      |               |         |
 | `count`    | `Int`    | yes      | default `0`   |         |
 
-Indexes and constraints: `@@id([surveyId, blockId, pageId])`.
+Indexes and constraints: `id` (`_id`); `@@unique([surveyId, blockId, pageId])`.
 
 #### QaTestCase
 

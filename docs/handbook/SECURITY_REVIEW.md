@@ -7,6 +7,11 @@ into `main` (2026-11-05 and 2026-11-06); S10, S11 and sealing the vendor secret 
 matters and what to consider. Severities are the reviewer's judgement, not the result of a
 penetration test; nothing here was exploited against a running system other than the local one.
 
+**Since then (2026-11-09):** the API moved from NestJS to plain Express (ADR 0041) and from PostgreSQL to
+MongoDB (ADR 0040). The findings below quote the code as it was when they were written (for example
+`app.module.ts` and row-level security); where a fix depended on PostgreSQL, the note under that finding
+says what replaced it.
+
 For the project's own security notes, which this review does not replace, see
 [docs/security.md](../security.md) and [ADR 0026 security hardening](../adr/0026-security-hardening.md).
 
@@ -14,7 +19,7 @@ For the project's own security notes, which this review does not replace, see
 
 | Area                            | What the code does                                                                                                                                                                                                                                           | Where                                                                             |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Authentication                  | Global `AuthGuard`; every route needs a session or API key unless marked `@Public()`                                                                                                                                                                         | `apps/api/src/auth/auth.guard.ts`, `app.module.ts`                                |
+| Authentication                  | `AuthGuard` on every route; every route needs a session or API key unless declared `public: true`                                                                                                                                                            | `apps/api/src/auth/auth.guard.ts`, `apps/api/src/http/routes.ts`                  |
 | Sessions                        | HS256 JWT, 12 h, unique `jwtid`; `httpOnly`, `SameSite=Lax` cookie `zapx_token`, `Secure` when `COOKIE_SECURE=true`; "sign out everywhere" via `sessionsRevokedAt`                                                                                           | `apps/api/src/auth/session.ts`                                                    |
 | CSRF                            | Cookie requests must send `x-zapx-csrf: 1`, which a cross-site form cannot add                                                                                                                                                                               | `auth.guard.ts`                                                                   |
 | Passwords                       | bcryptjs cost 10; 10–200 characters; common-password list; dummy-hash compare against timing leaks                                                                                                                                                           | `auth/auth.controller.ts`, `users/users.controller.ts`, `auth/password-policy.ts` |

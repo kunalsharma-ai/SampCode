@@ -40,8 +40,8 @@ your machine is the gate.
 
 1. `pnpm --filter <package> test` for the package you changed, while working.
 2. Add or update a test in the same area: a package `*.test.ts`, an API `apps/api/test/*.test.ts`
-   (they call the real Nest app with a real database), or a Playwright spec for a screen flow.
-3. Before pushing: `pnpm check --quick` (format, lint, build, typecheck, migrations, all tests).
+   (they start the real Express app with `createApp()` against a real database), or a Playwright spec for a screen flow.
+3. Before pushing: `pnpm check --quick` (format, lint, build, typecheck, database indexes, all tests).
 4. Before a release: full `pnpm check` (adds audit, Terraform, e2e and Docker images).
 
 ### Recommended (not implemented)
@@ -96,12 +96,13 @@ path is not documented in the repository; AWS is the documented production targe
 ### Implemented (written, validated, not yet applied)
 
 - **Infrastructure:** `infra/terraform/` creates VPC, ALB, ECS Fargate services (API ×2, worker ×1,
-  studio ×2, with autoscaling for API and studio), RDS PostgreSQL (not yet moved to MongoDB, ADR 0040; Multi-AZ, 14-day backups in
-  production), S3 buckets, CloudFront for the runtime and CAPI app, WAF (count mode first), KMS,
+  studio ×2, with autoscaling for API and studio), a MongoDB Atlas cluster reached over AWS
+  PrivateLink (three-node replica set, point-in-time restore, daily snapshots), S3 buckets, CloudFront for the runtime and CAPI app, WAF (count mode first), KMS,
   Secrets Manager, AWS Backup (35 days), CloudWatch logs and alarms to SNS.
 - **Release script:** `infra/scripts/deploy-aws.sh`.
 
-The Terraform passes `terraform validate` and mocked plan tests, but **has never been applied to a
+The Terraform passes `terraform validate` and mocked plan tests (the MongoDB Atlas part is new and
+still needs `terraform validate` where the `mongodbatlas` provider can be downloaded), but **has never been applied to a
 real AWS account**, and the release script has **never been run**. Both say so in their own headers.
 Follow [docs/operations/go-live.md](../operations/go-live.md) in order and do everything on staging
 first.
@@ -141,8 +142,9 @@ flowchart TD
   F --> G[Invalidate index.html, sw.js, manifest on CloudFront]
 ```
 
-Order matters: migrations run **before** new code starts, so every migration must work with the
-code that is still running (add columns as optional first, remove old ones in a later release).
+Order matters: the index sync (`migrate` task) runs **before** new code starts, so every schema change
+must work with the code that is still running (add fields as optional first, remove old ones in a later
+release; a new unique rule must hold for the data already stored).
 
 ### Checks after a release
 
@@ -181,8 +183,9 @@ owner's store accounts.
 
 - **Automatic:** ECS replaces new tasks that fail their health check and keeps the old ones
   (Terraform README, "Releasing").
-- **Migrations failed:** the script stops before changing services, so nothing needs rolling back
-  except the failed migration itself (see [TROUBLESHOOTING.md 5c](TROUBLESHOOTING.md#5c-migration-fails-p3009-failed-migrations-p3018)).
+- **Index sync failed:** the script stops before changing services, so nothing needs rolling back. The
+  usual cause is existing data that breaks a new unique rule (see
+  [TROUBLESHOOTING.md 5b](TROUBLESHOOTING.md#5b-unique-rule-not-enforced-or-index--already-exists-with-different-options)).
 
 ### Manual rollback to an earlier version
 
@@ -208,11 +211,11 @@ Keep schema changes backward-compatible to avoid this.
 
 ### Implemented
 
-| Environment        | How                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Local / one server | `DATABASE_URL=... infra/scripts/backup.sh [dir]` writes `zapx-<UTC time>.dump` (pg_dump custom format) and keeps the newest `KEEP` (default 14).       |
-| Restore            | `DATABASE_URL=<empty-db-url> infra/scripts/restore.sh <file>.dump` (pg_restore, stops on first error).                                                 |
-| AWS                | RDS automated backups with point-in-time recovery (14 days in production) and AWS Backup for RDS and the files bucket (35 days), defined in Terraform. |
+| Environment        | How                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / one server | `DATABASE_URL=... infra/scripts/backup.sh [dir]` writes `zapx-<UTC time>.archive.gz` (mongodump archive) and keeps the newest `KEEP` (default 14).         |
+| Restore            | `DATABASE_URL=<empty-db-url> infra/scripts/restore.sh <file>.archive.gz` (mongorestore, stops on first error).                                             |
+| AWS                | MongoDB Atlas continuous backup with point-in-time restore and daily snapshots (`infra/terraform/database.tf`); AWS Backup for the files bucket (35 days). |
 
 Targets written in [docs/operations/database.md](../operations/database.md): RPO ≤ 5 minutes, RTO
 ≤ 1 hour. They are targets, not measured values.
@@ -220,7 +223,7 @@ Targets written in [docs/operations/database.md](../operations/database.md): RPO
 Rules:
 
 - Restore **into a new, empty database**, never over the live one, then point a scratch stack at it.
-- Files (exports, media, CAPI photos) are not in `pg_dump`. Locally they live in `FILES_DIR`
+- Files (exports, media, CAPI photos) are not in the database backup. Locally they live in `FILES_DIR`
   (default `.data/files`); copy that folder too. On AWS they are in S3, covered by AWS Backup.
 
 Restore drill (local):
