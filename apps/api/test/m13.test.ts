@@ -577,7 +577,13 @@ describe('running on AWS', () => {
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
     // MongoDB Atlas (infra/terraform/ecs.tf): a DNS seed list, no port.
     expect(
-      databaseUrlFromParts({ DB_HOST: 'sampcode-pl-0.abcde.mongodb.net', DB_SCHEME: 'mongodb+srv', DB_USER: 'zapx', DB_PASSWORD: 'pw', DB_NAME: 'zapx' }),
+      databaseUrlFromParts({
+        DB_HOST: 'sampcode-pl-0.abcde.mongodb.net',
+        DB_SCHEME: 'mongodb+srv',
+        DB_USER: 'zapx',
+        DB_PASSWORD: 'pw',
+        DB_NAME: 'zapx',
+      }),
     ).toBe('mongodb+srv://zapx:pw@sampcode-pl-0.abcde.mongodb.net/zapx?retryWrites=true&w=majority'); // secret-scan:allow (made-up test password)
   });
 
