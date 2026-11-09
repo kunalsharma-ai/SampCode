@@ -60,11 +60,10 @@ in `pnpm-workspace.yaml`.
 - Webhook secrets are sealed with `SecretBox` (AES-256-GCM, key from `SECRETS_KEY`); requests are
   signed with HMAC-SHA256 over timestamp and body; endpoints must be https and public (SSRF guard).
   Payloads contain no answers.
-- Row-level security: `Response` has a forced RLS policy keyed on `app.tenant_id`, which the
-  tenant-scoped client sets for studio reads of respondent data. When the setting is absent the
-  policy allows all rows (system paths), so it is a second line of defence, not complete database
-  isolation. It is not applied at all if the API connects as a superuser or a `BYPASSRLS` role; the
-  API logs a warning at start-up and reports the state at `GET /api/audit/security`.
+- Tenant guard (replaced PostgreSQL row-level security with MongoDB, ADR 0040): the tenant-scoped
+  client (`PrismaService.forTenant`) used for studio reads of respondent data adds the organization
+  to every filter and refuses writes to another organization's rows. System paths (respondent flow,
+  workers) use the plain client, so it is a second line of defence, not complete database isolation.
 
 ## Identity, provisioning and plans (Milestone 8)
 
@@ -97,9 +96,10 @@ in `pnpm-workspace.yaml`.
 - **Edge trust:** with `EDGE_SHARED_SECRET` set, the viewer address and country headers are dropped
   from any request that does not carry the CDN's secret (constant-time comparison), so they cannot
   be forged by calling the API directly. The ALB forwards the respondent origin only with the header.
-- **AWS secrets** live in Secrets Manager (app secret) and the RDS-managed secret (database
-  password); Terraform creates the secret but never holds its values (except `edge_shared_secret`,
-  which CloudFront needs, so treat the Terraform state as secret).
+- **AWS secrets** live in Secrets Manager: the app secret (Terraform creates it but never holds its
+  values) and `zapx-<env>/database` with the MongoDB Atlas user, whose generated password Terraform
+  writes there. The Terraform state therefore holds the database password and `edge_shared_secret`
+  (which CloudFront needs), so treat the state as secret.
 
 ## Third-party lookups (Milestone 16 onwards)
 

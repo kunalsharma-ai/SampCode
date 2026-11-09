@@ -14,7 +14,7 @@ routes), **service** (business logic), **repository** (database access only), **
 ```
 Sampledge-ZAPX/
 ├── apps/                       the programs people run
-│   ├── api/                    NestJS backend: all business logic and the REST API (/api, port 4000)
+│   ├── api/                    Express backend: all business logic and the REST API (/api, port 4000)
 │   ├── studio/                 Next.js studio for research teams (port 3000)
 │   ├── runtime/                respondent survey app, Vite + React (port 5173)
 │   ├── capi/                   offline interviewer app (PWA), Vite + React (port 5174)
@@ -74,34 +74,37 @@ before the apps see the change, because apps import the built `dist/` output.
 
 **Entry points and configuration**
 
-| File                                                 | Kind       | Responsibility                                                                                                  |
-| ---------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
-| `src/main.ts`                                        | entry      | starts the HTTP server on `API_PORT`                                                                            |
-| `src/worker.ts`                                      | entry      | starts only the background loops (jobs, callbacks, webhooks); no HTTP                                           |
-| `src/app.module.ts`                                  | config     | registers every controller and service, global guards, rate limit, JWT, the AI provider factory, the file store |
-| `src/bootstrap.ts`                                   | middleware | cookies, JSON parsing, `/api` prefix, proxy trust, CDN edge trust, security headers                             |
-| `src/config.ts`                                      | config     | reads and validates every environment variable; production safety checks                                        |
-| `src/database-url.ts`                                | config     | builds `DATABASE_URL` from `DB_*` parts (AWS)                                                                   |
-| `src/health.controller.ts`                           | controller | `GET /api/health` for load balancers and Docker                                                                 |
-| `src/cli/migrate.ts`                                 | entry      | `node apps/api/dist/cli/migrate.js` — creates collections and indexes (release)                                 |
-| `src/cli/set-plan.ts`                                | entry      | `node apps/api/dist/cli/set-plan.js <org id or email> <plan>`                                                   |
-| `src/cli/set-super-admin.ts`                         | entry      | `node apps/api/dist/cli/set-super-admin.js <email> [--remove]` — the only way to make a super admin (PR #41)    |
-| `src/cli/set-operator.ts`                            | entry      | marks the organization that runs the installation (`Tenant.platformOperator`) (PR #41)                          |
-| `package.json`, `tsconfig*.json`, `vitest.config.ts` | config     | build with `tsc`, tests with Vitest + SWC                                                                       |
+| File                                                                       | Kind       | Responsibility                                                                                                 |
+| -------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/main.ts`                                                              | entry      | starts the HTTP server on `API_PORT`                                                                           |
+| `src/worker.ts`                                                            | entry      | starts only the background loops (jobs, callbacks, webhooks); no HTTP                                          |
+| `src/container.ts`                                                         | config     | the composition root: every service and controller and what it is built from, start order, route mount order   |
+| `src/http/app.ts`                                                          | middleware | `createApp()`: Express app, body parsers, edge trust, security headers, routes, 404, error answers, start/stop |
+| `src/http/routes.ts`                                                       | utility    | `kit.route()`: one route's chain (rate limit, sign-in and roles, guards, upload, handler, answer)              |
+| `src/http/errors.ts`, `logger.ts`, `jwt.ts`, `throttle.ts`, `lifecycle.ts` | utility    | `HttpException` and subclasses, logger, session tokens, rate limits, start and stop hook types                 |
+| `src/bootstrap.ts`                                                         | middleware | CDN edge trust (`edgeTrust`), security headers (`securityHeaders`), the app logger                             |
+| `src/config.ts`                                                            | config     | reads and validates every environment variable; production safety checks                                       |
+| `src/database-url.ts`                                                      | config     | builds `DATABASE_URL` from `DB_*` parts (AWS)                                                                  |
+| `src/health.controller.ts`                                                 | controller | `GET /api/health` for load balancers and Docker                                                                |
+| `src/cli/migrate.ts`                                                       | entry      | `node apps/api/dist/cli/migrate.js` — creates collections and indexes (release)                                |
+| `src/cli/set-plan.ts`                                                      | entry      | `node apps/api/dist/cli/set-plan.js <org id or email> <plan>`                                                  |
+| `src/cli/set-super-admin.ts`                                               | entry      | `node apps/api/dist/cli/set-super-admin.js <email> [--remove]` — the only way to make a super admin (PR #41)   |
+| `src/cli/set-operator.ts`                                                  | entry      | marks the organization that runs the installation (`Tenant.platformOperator`) (PR #41)                         |
+| `package.json`, `tsconfig*.json`, `vitest.config.ts`                       | config     | build with `tsc`, tests with Vitest                                                                            |
 
 **Shared building blocks (`src/common`, `src/auth`, `src/platform`)**
 
 | File                                                                          | Kind               | Responsibility · connects to                                                                            |
 | ----------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| `common/common.module.ts`                                                     | config             | makes `PrismaService`, `AuditService`, `AccessService`, `PlanService` available everywhere              |
 | `common/prisma.service.ts`                                                    | repository         | the database client; `forTenant()` tenant isolation; retries write conflicts                            |
+| `common/mongo.ts`                                                             | utility            | MongoDB helpers: queue claims, skip-duplicate inserts, write-conflict retry, raw date and number values |
 | `common/access.service.ts`                                                    | service            | **the** project/survey/vendor filters for project-level access; used by almost every controller         |
 | `common/audit.service.ts`                                                     | service            | writes `AuditEvent` rows                                                                                |
 | `common/validation.ts`                                                        | utility            | `parseBody(schema, body)` → 400 with issues                                                             |
 | `common/net-guard.ts`                                                         | utility            | SSRF guard for every outbound call to a customer address                                                |
 | `common/send-bytes.ts`                                                        | utility            | sends files with byte-range support (audio/video seeking)                                               |
-| `auth/auth.guard.ts`                                                          | guard              | global authentication + role check (see ARCHITECTURE §7)                                                |
-| `auth/decorators.ts`                                                          | utility            | `@Public()`, `@Roles()`, `CAN_EDIT`, `ALL_ROLES`, `@CurrentUser()`                                      |
+| `auth/auth.guard.ts`                                                          | guard              | authentication + role check on every route (see ARCHITECTURE §7)                                        |
+| `auth/decorators.ts`                                                          | utility            | role groups `CAN_EDIT`, `ALL_ROLES`                                                                     |
 | `auth/auth.types.ts`                                                          | types              | `AuthUser`, role names, cookie and CSRF header names, API key prefix                                    |
 | `auth/password-reset.service.ts`                                              | service            | password reset links (hash only, one use, expiry), reset emails _(PR #36)_                              |
 | `auth/session.ts`                                                             | utility            | issues the 12-hour HS256 session and cookie                                                             |
@@ -151,7 +154,7 @@ before the apps see the change, because apps import the built `dist/` output.
 **Tests (`apps/api/test`)**: one file per milestone (`m2.test.ts` … `m20.test.ts`), per blueprint
 phase (`blueprint.test.ts` … `blueprint5.test.ts`), `api.test.ts` (M1), `dashboard.test.ts`,
 `quantum.test.ts`, `security-fixes.test.ts`, `eyetracking.test.ts` (PR #37), `m21.test.ts` (integrations in the CRM, PR #38),
-`super-admin.test.ts` (PR #41), `mobile.test.ts` (PR #40). They boot the real Nest app against the database in `.env` and call it with
+`super-admin.test.ts` (PR #41), `mobile.test.ts` (PR #40). They start the real Express app (`createApp()`) against the database in `.env` and call it with
 Supertest. `test/support/` has mock OIDC, SAML and S3 servers.
 
 ## 3. `apps/studio` — the research team's web app
@@ -271,23 +274,23 @@ Unit tests sit next to the code as `*.test.ts` (Vitest).
 
 ## 7. `e2e`, `infra`, `scripts`, `docs`
 
-| Path                                         | Responsibility                                                                                                               |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `e2e/playwright.config.ts`                   | starts the built API, studio, runtime and CAPI app with test settings (stand-ins for Deepgram and Twilio)                    |
-| `e2e/tests/*.spec.ts`                        | one browser test per milestone/phase; `e2e/fixtures/` media files                                                            |
-| `infra/nginx/*.conf`                         | runtime and CAPI static hosting, `/api` proxy, security headers                                                              |
-| `infra/scripts/backup.sh`, `restore.sh`      | `pg_dump` / `pg_restore` of the database                                                                                     |
-| `infra/scripts/deploy-aws.sh`                | release to AWS (build, push, migrate, roll out, publish static apps)                                                         |
-| `infra/terraform/*.tf`                       | AWS: network, ECS, RDS, S3, CloudFront, WAF, autoscaling, backups, monitoring; `tests/plan.tftest.hcl`                       |
-| `scripts/check.sh`                           | `pnpm check`: the full local quality gate                                                                                    |
-| `scripts/secret-scan.mjs`                    | blocks secrets in commits (hooks and `pnpm check`)                                                                           |
-| `scripts/projexa-check.mjs`                  | end-to-end check of the PROJEXA contract                                                                                     |
-| `docs/adr/`                                  | architecture decisions 0001–0037                                                                                             |
-| `docs/modules/`                              | module guides (redirects, AI gateway, data quality, CAPI, CATI, analytics, jobs, SSO, billing, webhooks, rich media, access) |
-| `docs/api/openapi.yaml`, `capi-openapi.yaml` | partner (vendor) API and CAPI API contracts                                                                                  |
-| `docs/operations/`                           | database operations, go-live steps, GitHub security settings, merge order, mobile release (PR #40)                           |
-| `docs/product/blueprint-parity.md`           | the blueprint feature matrix                                                                                                 |
-| `docs/handbook/`                             | this handbook                                                                                                                |
+| Path                                         | Responsibility                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `e2e/playwright.config.ts`                   | starts the built API, studio, runtime and CAPI app with test settings (stand-ins for Deepgram and Twilio)                        |
+| `e2e/tests/*.spec.ts`                        | one browser test per milestone/phase; `e2e/fixtures/` media files                                                                |
+| `infra/nginx/*.conf`                         | runtime and CAPI static hosting, `/api` proxy, security headers                                                                  |
+| `infra/scripts/backup.sh`, `restore.sh`      | `mongodump` / `mongorestore` of the database                                                                                     |
+| `infra/scripts/deploy-aws.sh`                | release to AWS (build, push, migrate, roll out, publish static apps)                                                             |
+| `infra/terraform/*.tf`                       | AWS: network, ECS, MongoDB Atlas (`database.tf`), S3, CloudFront, WAF, autoscaling, backups, monitoring; `tests/plan.tftest.hcl` |
+| `scripts/check.sh`                           | `pnpm check`: the full local quality gate                                                                                        |
+| `scripts/secret-scan.mjs`                    | blocks secrets in commits (hooks and `pnpm check`)                                                                               |
+| `scripts/projexa-check.mjs`                  | end-to-end check of the PROJEXA contract                                                                                         |
+| `docs/adr/`                                  | architecture decisions 0001–0037                                                                                                 |
+| `docs/modules/`                              | module guides (redirects, AI gateway, data quality, CAPI, CATI, analytics, jobs, SSO, billing, webhooks, rich media, access)     |
+| `docs/api/openapi.yaml`, `capi-openapi.yaml` | partner (vendor) API and CAPI API contracts                                                                                      |
+| `docs/operations/`                           | database operations, go-live steps, GitHub security settings, merge order, mobile release (PR #40)                               |
+| `docs/product/blueprint-parity.md`           | the blueprint feature matrix                                                                                                     |
+| `docs/handbook/`                             | this handbook                                                                                                                    |
 
 ## 8. Which files to change for a feature
 

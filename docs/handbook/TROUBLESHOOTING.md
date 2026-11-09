@@ -23,13 +23,13 @@ check (`infra/terraform/ecs.tf`, `infra/terraform/edge.tf`).
 
 Where logs go:
 
-| Where you run it              | API / worker logs                                                          | Studio / runtime / CAPI                     |
-| ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
-| `pnpm dev`                    | the terminal (Nest `Logger`, context `SampCode`)                           | the terminal, plus the browser console      |
-| `docker compose up`           | `docker compose logs -f api worker`                                        | `docker compose logs -f studio`; browser    |
-| AWS (after `terraform apply`) | CloudWatch log groups `/zapx/<env>/api`, `/zapx/<env>/worker`, `…/migrate` | `/zapx/<env>/studio`; runtime/CAPI = S3+CDN |
+| Where you run it              | API / worker logs                                                            | Studio / runtime / CAPI                     |
+| ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------- |
+| `pnpm dev`                    | the terminal (`Logger` in `apps/api/src/http/logger.ts`, context `SampCode`) | the terminal, plus the browser console      |
+| `docker compose up`           | `docker compose logs -f api worker`                                          | `docker compose logs -f studio`; browser    |
+| AWS (after `terraform apply`) | CloudWatch log groups `/zapx/<env>/api`, `/zapx/<env>/worker`, `…/migrate`   | `/zapx/<env>/studio`; runtime/CAPI = S3+CDN |
 
-There is no request log and no log level setting; the API logs startup, worker activity and errors.
+There is no request log; `LOG_LEVEL=debug` adds debug lines and `LOG_LEVEL=silent` turns logging off; the API logs startup, worker activity and errors.
 In the browser, open DevTools → Network and look at the failing `/api/...` call: its JSON body holds
 the API's `message`.
 
@@ -171,7 +171,8 @@ API code change, stop it and run it again (or run `pnpm --filter @zapx/api build
 ### 3a. 500 `Internal server error`
 
 - **Causes:** an exception that is not an `HttpException` (a bug, a Prisma error, a third-party
-  call). Nest hides the details from the client and logs the stack.
+  call). The error middleware (`errorHandler` in
+  `apps/api/src/http/app.ts`) hides the details from the client and logs the stack.
 - **Files:** the controller for the route (find it in the route table in
   [API_DOCUMENTATION.md](API_DOCUMENTATION.md)), its service, and `apps/api/src/common/`.
 - **Commands:** reproduce with curl, then read the API log at the same moment:
@@ -208,7 +209,7 @@ API code change, stop it and run it again (or run `pnpm --filter @zapx/api build
 | 401    | `Not signed in`, `Session expired`                                                          | no cookie/token, token older than 12 h, "sign out everywhere"                                     | sign in again                                                  |
 | 401    | `Invalid API key`, `This API key was revoked/has expired`                                   | wrong, revoked or expired key, or its creator was disabled                                        | create a new key (Settings → API keys)                         |
 | 403    | `Missing CSRF header`                                                                       | cookie request without `x-zapx-csrf: 1`                                                           | add the header (the studio does this; curl must too)           |
-| 403    | `Your role cannot do this`                                                                  | the route's `@Roles(...)` excludes the role; INTERVIEWER is deny-by-default                       | change the member's role or use another account                |
+| 403    | `Your role cannot do this`                                                                  | the route's `roles` excludes the role; INTERVIEWER is deny-by-default                             | change the member's role or use another account                |
 | 403    | `code: FEATURE_DISABLED`, `ORG_SUSPENDED`, `MOBILE_DISABLED`, `SUPER_ADMIN_ONLY` _(PR #41)_ | the plan or a super admin switched the feature off, suspended the organization, or blocked mobile | see [section 12](#12-super-admin-plans-and-features-_pr-41_)   |
 | 404    | `Not found` on something that exists                                                        | project not assigned to this member (`AccessService`)                                             | assign the project                                             |
 | 409    | stale draft, duplicate vendor code or email                                                 | someone saved first, or the value is taken                                                        | reload, merge, retry; choose another code                      |
@@ -376,7 +377,7 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 
 - Quota counts are kept in quota rows updated during `complete`. Code:
   `apps/api/src/quotas/`. Compare the counter with
-  `SELECT count(*) FROM "Response" WHERE status='COMPLETE' AND …` for the quota's condition.
+  `db.Response.countDocuments({ surveyId: '<id>', status: 'COMPLETE', … })` for the quota's condition.
 
 ### 7e. A respondent finishes but is not redirected, or goes to the wrong place
 
@@ -459,7 +460,8 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 
 ### 9c. Work runs twice or not at all with several API instances
 
-- Jobs and deliveries are claimed with `FOR UPDATE SKIP LOCKED`, so several workers are safe. If
+- Jobs and deliveries are claimed with a conditional update that only one worker wins, so several
+  workers are safe. If
   `JOB_WORKER` and `CALLBACK_WORKER` are `off` everywhere, nothing runs. Exactly as on AWS: API tasks
   `off`, one worker task `on`.
 
@@ -524,13 +526,14 @@ staging. More in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### 11b. Many 429s under load
 
-- The global limit is 600 requests per minute per address **per API process** (memory store,
-  `ThrottlerModule.forRoot` in `apps/api/src/app.module.ts`). Interview centres behind one address
+- The default limit is 600 requests per minute per address (`DEFAULT_THROTTLE` in
+  `apps/api/src/http/throttle.ts`), shared by every API process in production (`THROTTLE_STORE=database`)
+  and per process otherwise. Interview centres behind one address
   share the limit; on AWS the WAF rate limit (`waf_rate_limit`) applies too.
 
 ### 11c. Worker falls behind
 
-- Look at queued work: `SELECT type, count(*) FROM "Job" WHERE status='QUEUED' GROUP BY type;`.
+- Look at queued work: `db.Job.aggregate([{ $match: { status: 'QUEUED' } }, { $group: { _id: '$type', n: { $sum: 1 } } }])` in `mongosh`.
   Add a worker process (safe, see 9c) or lower the work per job.
 
 ---

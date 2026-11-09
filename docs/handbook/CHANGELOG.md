@@ -7,14 +7,33 @@ for most, a module guide in [docs/modules/](../modules/).
 The format follows [Keep a Changelog](https://keepachangelog.com/): newest first, grouped by
 release. SampCode (called ZAPX until 2026-11-06) has no version numbers or git tags yet, so entries are grouped by milestone or PR.
 
-## MongoDB in place of PostgreSQL (2026-11-09, open PR)
+## Express and MongoDB Atlas (opened 2026-11-09, PRs #58, #60, #61, not merged yet)
+
+### Changed
+
+- PR #58, branch `mongodb-atlas-infra`: Terraform creates a **MongoDB Atlas** cluster over AWS PrivateLink
+  (three members, point-in-time restore, daily snapshots, alerts) instead of RDS, and a `readWrite`
+  database user in Secrets Manager; `database-url.ts` builds `mongodb+srv` URLs (`DB_SCHEME`).
+  `packages/db/src/copy-from-postgres.ts` copies an existing PostgreSQL installation
+  ([operations/database.md](../operations/database.md#moving-an-existing-postgresql-installation-to-mongodb)).
+- PR #60, branch `express-api`: **NestJS removed**; the API is plain Express 5
+  ([ADR 0041](../adr/0041-express.md)). Each controller file ends with a route function,
+  `src/container.ts` builds every service, `src/http/` holds the app, route kit, errors, logger, JWT and
+  rate limits. Paths, status codes, error bodies, headers and limits are unchanged.
+- PR #61, branch `docs-express-mongodb`: this handbook, the go-live guide and the READMEs.
+
+### Removed
+
+- `@nestjs/*`, `reflect-metadata`, `rxjs` and SWC for tests (#60); RDS in Terraform (#58).
+
+## MongoDB in place of PostgreSQL (merged 2026-11-09, PR #59)
 
 - SampCode now runs on MongoDB (7 or later, as a replica set) through Prisma 6, like SampAudience
   (ADR 0040). The API, links and integrations are unchanged. The SQL migrations are replaced by
   `pnpm db:migrate` creating collections and indexes from the schema; row-level security by the
   tenant-scoped client `forTenant`; row locks and `SKIP LOCKED` claims by guarded updates and
   transactions that run again on a write conflict. `docker compose up mongo` starts a one-member
-  replica set; backups use `mongodump`. `infra/terraform` still describes RDS PostgreSQL.
+  replica set; backups use `mongodump`. (Terraform moved to MongoDB Atlas in #58.)
 
 ## SampBidx and SampAudience names (2026-11-08)
 
