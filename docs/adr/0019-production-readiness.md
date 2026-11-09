@@ -1,7 +1,7 @@
 # 0019: Production readiness: S3, SAML, billing, AWS and the PROJEXA check
 
 Status: Accepted (Milestone 13). Supersedes the "no S3 adapter" limit of 0013, the "OIDC only" and
-"no billing" parts of 0014, and makes 0005's AWS mapping concrete.
+"no billing" parts of 0014, and makes 0005's AWS mapping concrete. The AWS and Terraform parts are superseded by [ADR 0042](0042-docker-compose-deployment.md) (2026-11-09).
 
 ## Context
 

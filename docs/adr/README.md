@@ -9,7 +9,7 @@ they are accepted; a later record supersedes an earlier one.
 | [0002](0002-prisma-and-repository-boundaries.md) | Prisma on PostgreSQL, behind repository boundaries                         | Accepted                                               |
 | [0003](0003-redirect-and-vendor-integration.md)  | Redirect & Vendor Integration module, and how ZAPX connects to PROJEXA     | Accepted                                               |
 | [0004](0004-ai-gateway.md)                       | AI model gateway                                                           | Accepted                                               |
-| [0005](0005-aws-deployment.md)                   | Containers locally, AWS (ECS/Fargate) in production                        | Accepted                                               |
+| [0005](0005-aws-deployment.md)                   | Containers locally, AWS (ECS/Fargate) in production                        | Superseded by 0042                                     |
 | [0006](0006-engineering-governance.md)           | Engineering governance and quality gates                                   | Accepted (CI and branch protection superseded by 0009) |
 | [0007](0007-data-quality.md)                     | Data quality scoring with human review                                     | Accepted                                               |
 | [0008](0008-capi-offline-app.md)                 | Offline CAPI app with server-side replay                                   | Accepted                                               |
@@ -23,8 +23,8 @@ they are accepted; a later record supersedes an earlier one.
 | [0016](0016-analysis-and-reports.md)             | Survey analysis and saved reports in the API                               | Accepted (weighting added by 0021)                     |
 | [0017](0017-rich-media-and-question-types.md)    | Rich media and advanced question types                                     | Accepted                                               |
 | [0018](0018-fraud-detection-and-capi-capture.md) | Fraud detection and face-to-face capture                                   | Accepted                                               |
-| [0019](0019-production-readiness.md)             | Production readiness: S3, SAML, billing, AWS and the PROJEXA check         | Accepted                                               |
-| [0020](0020-edge-protection-scaling-backups.md)  | Edge protection, autoscaling and backups on AWS                            | Accepted                                               |
+| [0019](0019-production-readiness.md)             | Production readiness: S3, SAML, billing, AWS and the PROJEXA check         | Accepted (AWS parts superseded by 0042)                |
+| [0020](0020-edge-protection-scaling-backups.md)  | Edge protection, autoscaling and backups on AWS                            | Superseded by 0042 (AWS parts)                         |
 | [0021](0021-weighting.md)                        | Rim weighting in analysis                                                  | Accepted                                               |
 | [0022](0022-network-reputation.md)               | Network reputation through a provider adapter                              | Accepted                                               |
 | [0023](0023-transcription.md)                    | Transcripts of interview recordings through a provider adapter             | Accepted                                               |
@@ -46,5 +46,6 @@ they are accepted; a later record supersedes an earlier one.
 | [0039](0039-sampbidx-sampaudience-names.md)      | Bidzo renamed SampBidx and SAMPLEON renamed SampAudience in user text      | Accepted                                               |
 | [0040](0040-mongodb.md)                          | MongoDB in place of PostgreSQL                                             | Accepted                                               |
 | [0041](0041-express.md)                          | Plain Express replaces NestJS: route functions, one composition root       | Accepted                                               |
+| [0042](0042-docker-compose-deployment.md)        | Production on Docker Compose with Caddy; Terraform and AWS removed         | Accepted                                               |
 
 Template: copy an existing record; sections are Context, Decision, Consequences.

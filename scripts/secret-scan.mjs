@@ -45,7 +45,7 @@ const RULES = [
 
 /** Files that must never be committed, whatever they contain. */
 const FORBIDDEN_FILES = [
-  { name: 'Environment file', re: /(^|\/)\.env(\.(?!example$|sample$)[^/]+)?$/ },
+  { name: 'Environment file', re: /(^|\/)\.env(\.(?!example$|sample$|production\.example$)[^/]+)?$/ },
   { name: 'Private key file', re: /\.(pem|key|p12|pfx|jks|keystore)$|(^|\/)id_(rsa|dsa|ecdsa|ed25519)$/ },
   { name: 'Terraform state', re: /\.tfstate(\.backup)?$|(^|\/)\.terraform\// },
   { name: 'Terraform variables', re: /\.tfvars(\.json)?$/, allow: /(^|\/)example\.tfvars$/ },

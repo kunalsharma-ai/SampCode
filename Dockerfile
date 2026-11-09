@@ -4,7 +4,7 @@
 #   docker build --target studio -t zapx-studio .
 #   docker build --target runtime -t zapx-runtime .
 #   docker build --target capi -t zapx-capi .
-# The same images run locally under docker compose and on AWS ECS/Fargate.
+# The same images run locally (docker-compose.yml) and in production (docker-compose.prod.yml).
 
 FROM node:26-bookworm-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -25,7 +25,7 @@ RUN pnpm build
 FROM base AS api
 ENV NODE_ENV=production
 COPY --from=build --chown=node:node /app /app
-# Local file store (FILES_DIR), shared with the worker through a volume. On AWS, FILE_STORE=s3 is used instead.
+# Local file store (FILES_DIR), shared with the worker through a volume. FILE_STORE=s3 keeps files in S3 instead.
 ENV FILES_DIR=/data/files
 RUN mkdir -p /data/files && chown -R node:node /data
 USER node
@@ -33,7 +33,7 @@ EXPOSE 4000
 HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD node -e "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/main.js"]
 
-# One-off job: apply database migrations, then exit (an ECS task before each deployment).
+# One-off job: apply database migrations, then exit (the compose migrate service, before the API starts).
 FROM api AS migrate
 HEALTHCHECK NONE
 # Accepts DATABASE_URL or the DB_* parts (apps/api/src/database-url.ts), like the API.
@@ -53,7 +53,7 @@ WORKDIR /app/apps/studio
 EXPOSE 3000
 CMD ["node_modules/.bin/next", "start", "-p", "3000"]
 
-# ---- Respondent runtime: static files plus an /api proxy (CloudFront + S3 + ALB on AWS) -------
+# ---- Respondent runtime: static files plus an /api proxy ----------------------------------------
 FROM nginx:1.31-alpine AS runtime
 COPY infra/nginx/runtime.conf /etc/nginx/conf.d/default.conf
 COPY infra/nginx/runtime-headers.conf /etc/nginx/snippets/runtime-headers.conf

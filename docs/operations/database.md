@@ -6,8 +6,8 @@ MongoDB 7 or later, as a replica set, through Prisma 6. Decision: [ADR 0040](../
 ## Collections and indexes
 
 - Change the schema in `packages/db/prisma/schema.prisma`, then `pnpm --filter @zapx/db build`.
-- Apply: `pnpm db:migrate` locally and in CI; the `migrate` image (`docker compose` or an ECS
-  one-off task) before each release. It creates every collection and index the schema declares
+- Apply: `pnpm db:migrate` locally and in CI; in production the `migrate` service of
+  `docker-compose.prod.yml` runs on every `up`, before the API starts. It creates every collection and index the schema declares
   (`packages/db/src/indexes.ts`) and does nothing when they exist.
 - There are no SQL migrations. A new optional field needs nothing; a renamed or removed field
   ships in two releases (stop using, then clean up the documents with a one-off script).
@@ -19,6 +19,19 @@ MongoDB 7 or later, as a replica set, through Prisma 6. Decision: [ADR 0040](../
 Prisma needs a replica set for transactions. `docker compose up -d mongo` starts a one-member set
 (`rs0`); connect from your machine with `mongodb://localhost:27017/zapx?directConnection=true`.
 
+In production (`docker-compose.prod.yml`) the set is also one member, `mongo:27017`, with a key file
+(the `mongo-keyfile` service writes it once) and two users made on the first start: the root user
+(`MONGO_ROOT_USER`) and the app user (`MONGO_APP_USER`, `readWrite` on `zapx`). MongoDB is not
+published on the host. A shell on it:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production exec mongo \
+  mongosh -u root -p --authenticationDatabase admin zapx
+```
+
+To change a password later, use `db.changeUserPassword` in that shell, then the new value in
+`.env.production` and `up -d` (the values there are used only on an empty volume).
+
 ## Connection pooling
 
 Each API process has one pool. Size it in `DATABASE_URL`: `&maxPoolSize=10`. Instances ×
@@ -26,16 +39,31 @@ Each API process has one pool. Size it in `DATABASE_URL`: `&maxPoolSize=10`. Ins
 
 ## Backups and recovery
 
-|                       | Local / single server                                    | AWS (MongoDB Atlas, `infra/terraform/database.tf`)                             |
-| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Continuous            | –                                                        | Atlas point-in-time restore (last 7 days)                                      |
-| Daily                 | `infra/scripts/backup.sh` (mongodump archive, keeps 14)  | Atlas daily snapshots, 14 days (`db_backup_retention_days`); files: AWS Backup |
-| Before risky releases | `infra/scripts/backup.sh`                                | on-demand Atlas snapshot                                                       |
-| Restore               | `infra/scripts/restore.sh <file>` into an empty database | restore into a **new** cluster, verify, switch `DB_HOST`                       |
+On a Docker Compose deployment the `backup` service runs `infra/scripts/backup.sh` every
+`BACKUP_INTERVAL_HOURS` (24): a gzip `mongodump` archive of the `zapx` database in `BACKUP_DIR`
+(`./backups` next to the compose file), keeping the newest `BACKUP_KEEP` (14).
 
-The scripts need MongoDB Database Tools (`mongodump`, `mongorestore`).
+| When                  | What                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daily                 | the `backup` service; then **copy `./backups` off the server** (rsync to another machine, or `aws s3 sync` / `rclone` to a bucket)                                |
+| Before risky releases | `docker compose -f docker-compose.prod.yml --env-file .env.production exec backup bash -c '/scripts/backup.sh /backups'`                                          |
+| Uploaded files        | the `files` volume: `docker run --rm -v sampcode_files:/f -v "$PWD/backups":/b alpine tar czf /b/files-$(date +%F).tgz -C /f .` (not needed with `FILE_STORE=s3`) |
+| Whole server          | a disk snapshot from the hosting provider, if it offers one                                                                                                       |
 
-Targets to agree with customers: RPO ≤ 5 minutes (PITR), RTO ≤ 1 hour. **Test a restore every
+Restore into the running stack (it replaces the `zapx` collections that are in the archive):
+
+```bash
+DC="docker compose -f docker-compose.prod.yml --env-file .env.production"
+$DC stop api worker
+$DC exec backup bash -c 'mongorestore --uri="$DATABASE_URL" --gzip --archive=/backups/<file> --drop --stopOnError'
+$DC run --rm migrate      # recreates any index the archive did not carry
+$DC up -d
+```
+
+Outside Docker, `infra/scripts/backup.sh` and `infra/scripts/restore.sh` do the same with
+MongoDB Database Tools (`mongodump`, `mongorestore`) installed.
+
+Targets to agree with customers: RPO 24 hours with the daily backup (run the service more often, with a smaller `BACKUP_INTERVAL_HOURS`, for less), RTO ≤ 1 hour. **Test a restore every
 quarter** into a scratch database and run `pnpm test` against it; a backup that has never been
 restored is not a backup.
 
@@ -44,7 +72,7 @@ restored is not a backup.
 A one-off copy, done once per environment during a short maintenance window:
 
 1. Take a PostgreSQL backup with the **old** release's `infra/scripts/backup.sh` (pg_dump).
-2. Stop the API and worker (scale the ECS services to 0, or `docker compose stop api worker`).
+2. Stop the API and worker (`docker compose -f docker-compose.prod.yml --env-file .env.production stop api worker`).
 3. Prepare MongoDB: `DATABASE_URL=mongodb://… pnpm db:migrate`.
 4. Copy, with the new release built (`pnpm build`):
 
@@ -75,6 +103,6 @@ respondent data from the studio also go through `prisma.forTenant(tenantId)`, wh
 (ADR 0040; on PostgreSQL this was row-level security, ADR 0012). `GET /api/audit/security` (admins)
 answers `enforced`.
 
-In production give the API a database user with `readWrite` on the `zapx` database only. Terraform creates that user
-(`mongodbatlas_database_user`) and puts its name and password in the `zapx-<env>/database` secret; the tasks
-receive them as `DB_USER` and `DB_PASSWORD`, and reach the cluster only over AWS PrivateLink.
+In production the API connects as a database user with `readWrite` on the `zapx` database only
+(`MONGO_APP_USER`, created by `infra/mongo/create-app-user.sh` on the first start), and MongoDB is
+reachable only inside the compose network.

@@ -570,7 +570,7 @@ describe('running on AWS', () => {
     })!;
     expect(url).toBe('mongodb://zapx:p%40ss%3Aw%2Frd%3F%23%25@zapx.abc.eu-west-1.docdb.amazonaws.com:27017/zapx?tls=true&replicaSet=rs0'); // secret-scan:allow (made-up test password)
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
-    // MongoDB Atlas (infra/terraform/ecs.tf): a DNS seed list, no port.
+    // A hosted cluster with a DNS seed list (for example MongoDB Atlas): no port.
     expect(
       databaseUrlFromParts({
         DB_HOST: 'sampcode-pl-0.abcde.mongodb.net',

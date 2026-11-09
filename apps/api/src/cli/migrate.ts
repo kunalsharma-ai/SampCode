@@ -1,6 +1,6 @@
 /**
- * Operator command (Milestone 13): create the MongoDB collections and indexes, then exit. The ECS
- * migration task runs it before each release; it accepts DATABASE_URL or the DB_* parts (see
+ * Operator command (Milestone 13): create the MongoDB collections and indexes, then exit. The compose
+ * migrate service runs it before the API starts; it accepts DATABASE_URL or the DB_* parts (see
  * database-url.ts). Running it again is a no-op (see packages/db/src/indexes.ts).
  *
  *   node apps/api/dist/cli/migrate.js

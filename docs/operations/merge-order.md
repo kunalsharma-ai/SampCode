@@ -1,12 +1,13 @@
 # Merge order for the stacked pull requests
 
-## Current stack: Express and MongoDB (opened 2026-11-09)
+## Express and MongoDB (merged 2026-11-09)
 
-MongoDB itself is on `main` already (#59, merged 2026-11-09). Three pull requests finish the move, each
-built on the one before. Merge them in this order with **Create a merge commit** (after each merge, set
-the next PR's base to `main` if GitHub has not done it). Each passed `pnpm check --no-docker` locally (all
-348 API tests and 30 browser tests on MongoDB). #57 was an earlier MongoDB version and is closed in
-favour of #59.
+> **Done.** #62 (CI fix) and #58 were merged into `main`; #60 and #61 were merged into their stacked
+> branches, so #64 brought both to `main` (`main` = `98d12f7`). #58's Atlas Terraform was then removed
+> again when production moved to Docker Compose (ADR 0042).
+>
+> Lesson for the next stack: before merging each PR, check that its base is `main` (GitHub moves the
+> base only when the branch below is deleted), or the merge lands on the branch below instead.
 
 | Order | PR  | Branch                 | What it adds                                                                   |
 | ----- | --- | ---------------------- | ------------------------------------------------------------------------------ |
@@ -14,9 +15,9 @@ favour of #59.
 | 2     | #60 | `express-api`          | NestJS removed: plain Express routes, one composition root, same answers       |
 | 3     | #61 | `docs-express-mongodb` | Handbook, go-live guide and READMEs for Express and Atlas                      |
 
-After the last merge, an installation that already has data in PostgreSQL is moved with the runbook in
+An installation that already has data in PostgreSQL is moved with the runbook in
 [database.md](database.md#moving-an-existing-postgresql-installation-to-mongodb); a new installation
-only needs `pnpm db:migrate` (the deploy script runs it).
+needs nothing (the compose `migrate` service creates the collections and indexes).
 
 ## Earlier stack (merged)
 

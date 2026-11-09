@@ -103,8 +103,8 @@ replaced by #44. Still open: PR #47 (SampAudience integration, its own branch; n
 
 These parts are written and tested against local stand-ins only, so treat them as unproven until you
 have tried them on a staging environment ([docs/operations/go-live.md](../operations/go-live.md)):
-Claude AI calls, S3 storage, OpenID Connect and SAML sign-in, SCIM, Stripe billing, the AWS Terraform
-and release script, PROJEXA (checked against its code, not a deployed PROJEXA), IPinfo, Deepgram,
+Claude AI calls, S3 storage, OpenID Connect and SAML sign-in, SCIM, Stripe billing, the production
+Docker Compose deployment on a real server (it is booted in CI), PROJEXA (checked against its code, not a deployed PROJEXA), IPinfo, Deepgram,
 Twilio (voice and SMS) and SendGrid. Also unproven: webcam eye tracking on real webcams (PR #37), and the
 mobile app on real Android and iOS devices and in the app stores (PR #40; it has been type-checked,
 unit-tested and previewed on the web only).

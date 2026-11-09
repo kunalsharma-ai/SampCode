@@ -18,16 +18,16 @@ git branch --show-current && git log -1 --oneline  # which code you are actually
 ```
 
 `GET /api/health` (`apps/api/src/health.controller.ts`) runs a `ping` command, so a 500 there means the
-database, not the API, is the problem. On AWS the same URL is the container and load-balancer health
-check (`infra/terraform/ecs.tf`, `infra/terraform/edge.tf`).
+database, not the API, is the problem. The same URL is the container health check in the `Dockerfile`,
+which the studio, runtime and CAPI containers wait for.
 
 Where logs go:
 
-| Where you run it              | API / worker logs                                                            | Studio / runtime / CAPI                     |
-| ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------- |
-| `pnpm dev`                    | the terminal (`Logger` in `apps/api/src/http/logger.ts`, context `SampCode`) | the terminal, plus the browser console      |
-| `docker compose up`           | `docker compose logs -f api worker`                                          | `docker compose logs -f studio`; browser    |
-| AWS (after `terraform apply`) | CloudWatch log groups `/zapx/<env>/api`, `/zapx/<env>/worker`, `…/migrate`   | `/zapx/<env>/studio`; runtime/CAPI = S3+CDN |
+| Where you run it                       | API / worker logs                                                                         | Studio / runtime / CAPI                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `pnpm dev`                             | the terminal (`Logger` in `apps/api/src/http/logger.ts`, context `SampCode`)              | the terminal, plus the browser console   |
+| `docker compose up`                    | `docker compose logs -f api worker`                                                       | `docker compose logs -f studio`; browser |
+| Production (`docker-compose.prod.yml`) | `docker compose -f docker-compose.prod.yml --env-file .env.production logs -f api worker` | the same with `studio caddy`; browser    |
 
 There is no request log; `LOG_LEVEL=debug` adds debug lines and `LOG_LEVEL=silent` turns logging off; the API logs startup, worker activity and errors.
 In the browser, open DevTools → Network and look at the failing `/api/...` call: its JSON body holds
@@ -481,28 +481,27 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 - `docker compose logs api`: usually the `migrate` service failed first (look at
   `docker compose logs migrate`) or the configuration check (1a).
 
-### 10c. `infra/scripts/deploy-aws.sh` stops
+### 10c. The production stack does not come up
 
-| Message                                                      | Meaning and fix                                                                                                    |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `set ENVIRONMENT (staging or production)`                    | run `ENVIRONMENT=staging infra/scripts/deploy-aws.sh`                                                              |
-| `The working tree has changes; commit them first…`           | commit or stash; the image tag is the commit                                                                       |
-| `Migrations failed (exit N); the services were not changed.` | read CloudWatch `/zapx/<env>/migrate`; fix; release again                                                          |
-| `aws ecs wait services-stable` times out                     | new tasks fail health checks; read `/zapx/<env>/api`; ECS rolls back by itself                                     |
-| Tasks stop with `ResourceInitializationError … secret`       | a key in `app_secret_keys` is missing in the app secret JSON (see [CONFIGURATION.md](CONFIGURATION.md#gaps-found)) |
+| What you see                                                     | Meaning and fix                                                                                                                                                                                 |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `required variable ... is missing a value`                       | a required setting is empty in `.env.production`, or `--env-file .env.production` was left out                                                                                                  |
+| `mongo` stays `unhealthy`                                        | `docker compose -f docker-compose.prod.yml --env-file .env.production logs mongo`. `Authentication failed`: the passwords changed after the first start (they are only used on an empty volume) |
+| `migrate` exited 1                                               | `docker compose -f docker-compose.prod.yml --env-file .env.production logs migrate`; usually data that breaks a new unique rule (5b). The old API keeps running                                 |
+| Browser shows a certificate error, Caddy logs `challenge failed` | DNS for that domain does not point at the server yet, or ports 80/443 are closed in a firewall; Caddy retries by itself                                                                         |
+| `MongoDB cannot start: Linux kernel versions 6.19 and newer`     | the `GLIBC_TUNABLES` line was removed from the `mongo` service; put it back                                                                                                                     |
 
-The script has **not yet been run against AWS** (its own header says so). Expect first-run fixes on
-staging. More in [DEPLOYMENT.md](DEPLOYMENT.md).
+More in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### 10d. Respondents see the old runtime after a release
 
-- Hashed assets are cached for a year, entry files (`index.html`, `sw.js`,
-  `manifest.webmanifest`) are invalidated on CloudFront by the script. Check the invalidation
-  finished: `aws cloudfront list-invalidations --distribution-id <id>`.
+- Hashed assets are cached for a year; `index.html` is never cached and `sw.js` is revalidated
+  (`infra/nginx/*.conf`). Check the new `runtime` and `capi` containers are running
+  (`docker compose ... ps`), and if a CDN is in front, purge its cache for those files.
 
 ### 10e. Respondent country or IP is wrong behind the CDN
 
-- `EDGE_SHARED_SECRET` must match the `x-zapx-edge` header CloudFront adds; otherwise
+- Only with a CDN in front: `EDGE_SHARED_SECRET` must match the `x-zapx-edge` header the CDN adds; otherwise
   `edgeTrust` (`apps/api/src/bootstrap.ts`) drops the address and country headers. Also check
   `TRUST_PROXY_HOPS`.
 

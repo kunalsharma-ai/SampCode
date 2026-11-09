@@ -10,3 +10,5 @@
 e2e/test-results
 e2e/playwright-report
 coverage
+# Database backups made by the production backup service: never into an image
+backups

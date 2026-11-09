@@ -17,7 +17,6 @@ export default tseslint.config(
       '**/next-env.d.ts',
       'e2e/test-results/**',
       'e2e/playwright-report/**',
-      '**/.terraform/**',
       // MediaPipe's WebAssembly loader, copied from node_modules at build time (not our code).
       'apps/runtime/public/eyetracking/wasm/**',
       'apps/mobile/.expo/**',

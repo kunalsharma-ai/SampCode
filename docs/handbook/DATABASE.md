@@ -179,15 +179,14 @@ field in two releases (stop using it, then clean up the documents).
 
 ## 8. Backup and restoration
 
-| Environment           | Backup                                                                                                                                                                                    | Restore                                                                                                                  |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Local / single server | `DATABASE_URL=mongodb://... infra/scripts/backup.sh ./backups` (mongodump gzip archive, keeps the newest 14, `KEEP=` to change)                                                           | `DATABASE_URL=mongodb://.../empty_db infra/scripts/restore.sh backups/zapx-<time>.archive.gz` into an **empty** database |
-| AWS (Terraform)       | MongoDB Atlas continuous backup with point-in-time restore and daily snapshots (`db_backup_retention_days`, `infra/terraform/database.tf`); AWS Backup for the files bucket (`backup.tf`) | restore into a **new** Atlas cluster or bucket, verify, then point `DB_HOST` at it                                       |
+| Environment          | Backup                                                                                                                          | Restore                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / any server   | `DATABASE_URL=mongodb://... infra/scripts/backup.sh ./backups` (mongodump gzip archive, keeps the newest 14, `KEEP=` to change) | `DATABASE_URL=mongodb://.../empty_db infra/scripts/restore.sh backups/sampcode-<time>.archive.gz` into an **empty** database                                      |
+| Production (compose) | the `backup` service: a mongodump archive every 24 hours into `./backups` on the server, keeps 14; copy it off the server       | stop `api` and `worker`, `mongorestore --drop` in the backup container, then `migrate` ([operations/database.md](../operations/database.md#backups-and-recovery)) |
 
 Files (exports, media, photos, recordings) are **not** in the database: back up `FILES_DIR` (local)
-or rely on the S3 bucket's versioning and AWS Backup. Test a restore regularly (quarterly is the
-target in the operations guide). **Needs Verification:** the AWS backup plan has not been applied to a
-real account yet.
+or, in production, the `files` Docker volume; with `FILE_STORE=s3` use the bucket's versioning. Test a
+restore regularly (quarterly is the target in the operations guide).
 
 ## 9. Every table and field
 
