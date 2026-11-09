@@ -1,6 +1,6 @@
 # 0002 · Prisma on PostgreSQL, behind repository boundaries
 
-Date: 2026-11-01 · Status: Accepted
+Date: 2026-11-01 · Status: Accepted. The database is MongoDB since ADR 0040 (2026-11-09); Prisma and the repository boundaries stay.
 
 ## Context
 
