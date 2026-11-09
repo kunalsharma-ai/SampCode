@@ -40,3 +40,13 @@ output "migrate_task" {
     security_groups = [aws_security_group.tasks.id]
   }
 }
+
+output "database" {
+  description = "Atlas project and cluster. The app user and password are in the database secret."
+  value = {
+    atlas_project_id = mongodbatlas_project.main.id
+    cluster          = mongodbatlas_advanced_cluster.main.name
+    private_host     = local.db_host
+    secret_arn       = aws_secretsmanager_secret.db.arn
+  }
+}

@@ -6,6 +6,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    mongodbatlas = {
+      source  = "mongodb/mongodbatlas"
+      version = "~> 1.26"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
   # Configure a remote state backend per environment, e.g. in backend.hcl:
   #   bucket = "sampledge-terraform-state"  key = "zapx/production.tfstate"  region = "eu-west-1"  use_lockfile = true
@@ -28,6 +36,9 @@ provider "aws" {
     tags = { Application = "zapx", Environment = var.environment, ManagedBy = "terraform" }
   }
 }
+
+# MongoDB Atlas (database.tf): credentials from MONGODB_ATLAS_PUBLIC_KEY / MONGODB_ATLAS_PRIVATE_KEY.
+provider "mongodbatlas" {}
 
 data "aws_caller_identity" "current" {}
 data "aws_availability_zones" "available" { state = "available" }

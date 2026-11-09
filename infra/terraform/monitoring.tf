@@ -22,16 +22,7 @@ locals {
       dimensions  = { LoadBalancer = aws_lb.main.arn_suffix, TargetGroup = aws_lb_target_group.api.arn_suffix },
       description = "An API task is failing its health check"
     }
-    db_cpu = {
-      namespace   = "AWS/RDS", metric = "CPUUtilization", stat = "Average", threshold = 80, period = 300,
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.main.identifier },
-      description = "Database CPU above 80% for 5 minutes"
-    }
-    db_storage = {
-      namespace   = "AWS/RDS", metric = "FreeStorageSpace", stat = "Minimum", threshold = 5 * 1024 * 1024 * 1024, period = 300,
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.main.identifier }, comparison = "LessThanThreshold",
-      description = "Less than 5 GB of database storage left"
-    }
+    # Database CPU and disk alerts are Atlas alerts (database.tf), sent to the same alarm_email.
   }
 }
 

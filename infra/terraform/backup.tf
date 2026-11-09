@@ -1,7 +1,7 @@
 # ---- AWS Backup (Milestone 14) ------------------------------------------------------------------
-# Daily backups of the database and the files bucket, kept backup_retention_days, on top of the RDS
-# automated backups (point-in-time restore for db_backup_retention_days) and S3 versioning. The vault
-# uses the stack's KMS key.
+# Daily backups of the files bucket, kept backup_retention_days, on top of S3 versioning. The vault uses
+# the stack's KMS key. The database is backed up by Atlas itself (snapshots and point-in-time restore,
+# database.tf): AWS Backup cannot back up Atlas.
 resource "aws_backup_vault" "main" {
   count       = var.backup_enabled ? 1 : 0
   name        = local.name
@@ -55,5 +55,5 @@ resource "aws_backup_selection" "main" {
   name         = local.name
   plan_id      = aws_backup_plan.main[0].id
   iam_role_arn = aws_iam_role.backup[0].arn
-  resources    = [aws_db_instance.main.arn, aws_s3_bucket.files.arn]
+  resources    = [aws_s3_bucket.files.arn]
 }

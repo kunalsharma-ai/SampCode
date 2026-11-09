@@ -48,7 +48,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.app.arn, aws_db_instance.main.master_user_secret[0].secret_arn]
+    resources = [aws_secretsmanager_secret.app.arn, aws_secretsmanager_secret.db.arn]
   }
   statement {
     actions   = ["kms:Decrypt"]
@@ -119,10 +119,9 @@ locals {
     STUDIO_URL                   = "https://${var.studio_domain}"
     RUNTIME_BASE_URL             = "https://${var.runtime_domain}"
     CAPI_APP_URL                 = "https://${var.capi_domain}"
-    DB_HOST                      = aws_db_instance.main.address
-    DB_PORT                      = tostring(aws_db_instance.main.port)
-    DB_NAME                      = aws_db_instance.main.db_name
-    DB_SSLMODE                   = "require"
+    DB_HOST                      = local.db_host
+    DB_SCHEME                    = "mongodb+srv"
+    DB_NAME                      = local.db_name
     FILE_STORE                   = "s3"
     S3_BUCKET                    = aws_s3_bucket.files.id
     S3_REGION                    = var.region
@@ -136,8 +135,8 @@ locals {
 
   app_secrets = concat(
     [
-      { name = "DB_USER", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },
-      { name = "DB_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
+      { name = "DB_USER", valueFrom = "${aws_secretsmanager_secret.db.arn}:username::" },
+      { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db.arn}:password::" },
       { name = "EDGE_SHARED_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:EDGE_SHARED_SECRET::" },
     ],
     [for k in var.app_secret_keys : { name = k, valueFrom = "${aws_secretsmanager_secret.app.arn}:${k}::" }],

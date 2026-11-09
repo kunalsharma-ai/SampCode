@@ -108,57 +108,7 @@ resource "aws_s3_bucket_policy" "files" {
   policy = data.aws_iam_policy_document.files_tls.json
 }
 
-# ---- Database ----------------------------------------------------------------------------------
-resource "aws_db_subnet_group" "main" {
-  name       = local.name
-  subnet_ids = aws_subnet.private[*].id
-}
-
-resource "aws_db_parameter_group" "main" {
-  name   = local.name
-  family = "postgres16"
-  parameter {
-    name  = "rds.force_ssl"
-    value = "1"
-  }
-  parameter {
-    name  = "log_min_duration_statement"
-    value = "1000"
-  }
-}
-
-resource "aws_db_instance" "main" {
-  identifier                            = local.name
-  engine                                = "postgres"
-  engine_version                        = "16"
-  instance_class                        = var.db_instance_class
-  allocated_storage                     = var.db_allocated_storage
-  max_allocated_storage                 = var.db_allocated_storage * 4
-  storage_type                          = "gp3"
-  storage_encrypted                     = true
-  kms_key_id                            = aws_kms_key.data.arn
-  db_name                               = "zapx"
-  username                              = "zapx"
-  manage_master_user_password           = true
-  master_user_secret_kms_key_id         = aws_kms_key.data.arn
-  db_subnet_group_name                  = aws_db_subnet_group.main.name
-  parameter_group_name                  = aws_db_parameter_group.main.name
-  vpc_security_group_ids                = [aws_security_group.db.id]
-  multi_az                              = var.db_multi_az
-  backup_retention_period               = var.db_backup_retention_days
-  backup_window                         = "02:00-03:00"
-  maintenance_window                    = "sun:03:30-sun:04:30"
-  copy_tags_to_snapshot                 = true
-  deletion_protection                   = true
-  skip_final_snapshot                   = false
-  final_snapshot_identifier             = "${local.name}-final"
-  performance_insights_enabled          = true
-  performance_insights_kms_key_id       = aws_kms_key.data.arn
-  performance_insights_retention_period = 7
-  auto_minor_version_upgrade            = true
-  enabled_cloudwatch_logs_exports       = ["postgresql"]
-  apply_immediately                     = false
-}
+# The database (MongoDB Atlas) is in database.tf.
 
 # ---- Application secret (values are put in by an operator, never by Terraform) -------------------
 resource "aws_secretsmanager_secret" "app" {

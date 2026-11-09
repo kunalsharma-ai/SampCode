@@ -575,6 +575,16 @@ describe('running on AWS', () => {
     })!;
     expect(url).toBe('mongodb://zapx:p%40ss%3Aw%2Frd%3F%23%25@zapx.abc.eu-west-1.docdb.amazonaws.com:27017/zapx?tls=true&replicaSet=rs0'); // secret-scan:allow (made-up test password)
     expect(decodeURIComponent(new URL(url).password)).toBe('p@ss:w/rd?#%');
+    // MongoDB Atlas (infra/terraform/ecs.tf): a DNS seed list, no port.
+    expect(
+      databaseUrlFromParts({
+        DB_HOST: 'sampcode-pl-0.abcde.mongodb.net',
+        DB_SCHEME: 'mongodb+srv',
+        DB_USER: 'zapx',
+        DB_PASSWORD: 'pw',
+        DB_NAME: 'zapx',
+      }),
+    ).toBe('mongodb+srv://zapx:pw@sampcode-pl-0.abcde.mongodb.net/zapx?retryWrites=true&w=majority'); // secret-scan:allow (made-up test password)
   });
 
   it('reads viewer addresses as CloudFront sends them', () => {

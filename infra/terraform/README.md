@@ -1,9 +1,9 @@
 # SampCode on AWS (Terraform)
 
-One stack per environment (staging, production) in one AWS account and region. Status: the code
-passes `terraform validate` and plan tests against a mocked AWS provider (`tests/plan.tftest.hcl`,
-run by `pnpm check` when Terraform is installed). **It has not been applied to an AWS account yet.**
-Apply it to a staging account first and expect to adjust details there.
+One stack per environment (staging, production) in one AWS account and region, with its database in
+MongoDB Atlas (ADR 0040). Status: plan tests against mocked AWS, Atlas and random providers
+(`tests/plan.tftest.hcl`, run by `pnpm check` when Terraform is installed). **It has not been applied
+to an AWS account or Atlas organization yet.** Apply it to staging first and expect to adjust details there.
 
 ## What it creates
 
@@ -21,22 +21,23 @@ Apply it to a staging account first and expect to adjust details there.
                        │ API (Fargate)│ worker        │ studio          │
                        └──────┬───────┴──────┬────────┴─────────────────┘
                               │              │
-               RDS PostgreSQL 16 (Multi-AZ)  S3 files bucket (SSE-KMS)
+        PrivateLink endpoint │              │
+      MongoDB Atlas replica set (3)  S3 files bucket (SSE-KMS)
 ```
 
-| Part             | Resources                                                                                                                                                                               |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Network          | VPC over 2 zones, public and private subnets, NAT (one shared, or one per zone), S3 gateway endpoint                                                                                    |
-| Compute          | ECS cluster; services `api` (2), `worker` (1), `studio` (2); task `migrate`; ECR repos `api`, `studio`                                                                                  |
-| Database         | RDS PostgreSQL 16, encrypted, Multi-AZ, managed master password, `rds.force_ssl`, 14-day backups, deletion protection, Performance Insights                                             |
-| Files            | Private bucket, SSE-KMS, versioning (old versions expire after 30 days), TLS-only policy                                                                                                |
-| Static apps      | Two private buckets behind CloudFront with origin access control and an SPA rewrite function                                                                                            |
-| Edge             | ALB with HTTP→HTTPS, TLS 1.3 policy; CloudFront with security headers, `/api/*` uncached to the ALB                                                                                     |
-| Secrets and keys | One KMS key (rotation on) for data, logs, secrets and images; Secrets Manager secret `zapx-<env>/app`                                                                                   |
-| Protection       | AWS WAF on CloudFront and the ALB: AWS common, known-bad-inputs and IP-reputation rules, a per-address rate limit, logs of blocked and counted requests (sessions and secrets redacted) |
-| Scaling          | API (2–6 tasks) and studio (2–4) scale on CPU; the worker stays at 1                                                                                                                    |
-| Backups          | AWS Backup vault (KMS) with a daily plan for RDS and the files bucket, kept 35 days, on top of RDS point-in-time restore                                                                |
-| Observability    | CloudWatch log groups (30 days, encrypted), Container Insights, alarms (API 5xx, unhealthy tasks, DB CPU, DB storage) to an SNS topic                                                   |
+| Part             | Resources                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Network          | VPC over 2 zones, public and private subnets, NAT (one shared, or one per zone), S3 gateway endpoint                                                                                       |
+| Compute          | ECS cluster; services `api` (2), `worker` (1), `studio` (2); task `migrate`; ECR repos `api`, `studio`                                                                                     |
+| Database         | MongoDB Atlas project and dedicated cluster (3-member replica set, `db_instance_size`, MongoDB 8.0), PrivateLink only, TLS 1.2+, termination protection, app user in `zapx-<env>/database` |
+| Files            | Private bucket, SSE-KMS, versioning (old versions expire after 30 days), TLS-only policy                                                                                                   |
+| Static apps      | Two private buckets behind CloudFront with origin access control and an SPA rewrite function                                                                                               |
+| Edge             | ALB with HTTP→HTTPS, TLS 1.3 policy; CloudFront with security headers, `/api/*` uncached to the ALB                                                                                        |
+| Secrets and keys | One KMS key (rotation on) for data, logs, secrets and images; Secrets Manager secret `zapx-<env>/app`                                                                                      |
+| Protection       | AWS WAF on CloudFront and the ALB: AWS common, known-bad-inputs and IP-reputation rules, a per-address rate limit, logs of blocked and counted requests (sessions and secrets redacted)    |
+| Scaling          | API (2–6 tasks) and studio (2–4) scale on CPU; the worker stays at 1                                                                                                                       |
+| Backups          | Atlas daily snapshots (14 days) and point-in-time restore (7 days); AWS Backup vault (KMS) with a daily plan for the files bucket, kept 35 days                                            |
+| Observability    | CloudWatch log groups (30 days, encrypted), Container Insights, alarms (API 5xx, unhealthy tasks) to an SNS topic; Atlas alerts (CPU, disk) by email to `alarm_email`                      |
 
 ## Before the first apply
 
@@ -47,6 +48,13 @@ Apply it to a staging account first and expect to adjust details there.
    The state contains `edge_shared_secret`; restrict who can read the bucket.
 3. **Variables:** copy `example.tfvars` to `staging.tfvars` (git-ignored) and fill it in. Pass the
    edge secret on the command line or as `TF_VAR_edge_shared_secret` (`openssl rand -hex 32`).
+   The state also holds the generated Atlas user password.
+4. **MongoDB Atlas:** an Atlas organization (paid tier, billed by MongoDB or through AWS Marketplace).
+   Put its id in `atlas_org_id`, create an organization API key with the _Organization Project Creator_
+   role, and export it before `terraform apply`:
+   `export MONGODB_ATLAS_PUBLIC_KEY=... MONGODB_ATLAS_PRIVATE_KEY=...`. Terraform creates the project,
+   cluster, PrivateLink endpoint, backup schedule, app user and alerts. The first apply takes 10–20 minutes
+   (the cluster); if the private connection string is still empty at the end, run `terraform apply` again.
 
 ```bash
 cd infra/terraform
@@ -54,7 +62,7 @@ terraform init -backend-config=backend.hcl
 terraform apply -var-file=staging.tfvars
 ```
 
-4. **App secret:** put the secret values in Secrets Manager (Terraform never holds them):
+5. **App secret:** put the secret values in Secrets Manager (Terraform never holds them):
 
 ```bash
 aws secretsmanager put-secret-value --secret-id "$(terraform output -raw app_secret_arn)" --secret-string '{
@@ -112,17 +120,20 @@ health checks), then publishes the runtime and CAPI app to S3 and refreshes Clou
   centres that share one address. `waf_mode = "off"` removes WAF (about USD 15 a month plus requests).
 - **Autoscaling** owns the API and studio task counts after the first apply: Terraform no longer
   resets them. Raise `api_max_count` before a big fieldwork launch.
-- **Reaching the database:** set `ecs_exec_enabled = true`, apply, and run
-  `aws ecs execute-command --cluster <cluster> --task <task> --container api --interactive --command sh`
-  (Session Manager plugin needed; every session is in CloudTrail). Turn it off again afterwards.
-- **Restores:** restore a recovery point from the AWS Backup vault into a new instance or bucket,
-  never over the live one, then point a scratch stack at it. Do one restore test before go-live.
+- **Reaching the database:** the cluster is only reachable through PrivateLink. Set `ecs_exec_enabled = true`,
+  apply, and run `aws ecs execute-command --cluster <cluster> --task <task> --container api --interactive --command sh`
+  (Session Manager plugin needed; every session is in CloudTrail). Turn it off again afterwards. Atlas'
+  Data Explorer works too, for people with Atlas access.
+- **Restores:** database: restore an Atlas snapshot or a point in time into a **new** cluster (Atlas UI or
+  API), never over the live one, then point a scratch stack at it. Files: restore a recovery point from the
+  AWS Backup vault into a new bucket. Do one restore test before go-live.
 
 ## Costs (rough, eu-west-1, before traffic)
 
-NAT gateway(s), the ALB, WAF, RDS (`db.t4g.medium` Multi-AZ) and five small Fargate tasks are the fixed
-costs; together roughly USD 250–400 a month for production and about half for a staging stack with
-a single-AZ database. CloudFront, S3 and logs grow with use.
+NAT gateway(s), the ALB, WAF, PrivateLink, five small Fargate tasks and the Atlas cluster are the fixed
+costs. Atlas M20 is roughly USD 150–200 a month (M10 about USD 60 for staging; check Atlas pricing for your
+region); with AWS that is roughly USD 300–450 a month for production and about half for staging.
+CloudFront, S3, logs and Atlas backup storage grow with use.
 
 ## Not included yet
 
