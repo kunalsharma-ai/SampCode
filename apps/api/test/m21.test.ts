@@ -12,9 +12,9 @@ vi.hoisted(() => {
   process.env.JOB_WORKER = 'off';
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
   // One local stand-in plays every provider.
-  for (const k of ['ANTHROPIC_API_BASE', 'IPINFO_API_BASE', 'DEEPGRAM_API_BASE', 'TWILIO_API_BASE', 'STRIPE_API_BASE'])
+  for (const k of ['ANTHROPIC_API_BASE', 'IPINFO_API_BASE', 'DEEPGRAM_API_BASE', 'TWILIO_API_BASE', 'STRIPE_API_BASE', 'SENDGRID_API_BASE'])
     process.env[k] = 'http://127.0.0.1:5296';
-  for (const k of ['NETWORK_REPUTATION', 'TRANSCRIPTION', 'TELEPHONY', 'BILLING', 'FILE_STORE', 'ANTHROPIC_API_KEY']) delete process.env[k];
+  for (const k of ['NETWORK_REPUTATION', 'TRANSCRIPTION', 'TELEPHONY', 'BILLING', 'FILE_STORE', 'ANTHROPIC_API_KEY', 'EMAIL_PROVIDER', 'SENDGRID_API_KEY', 'EMAIL_FROM', 'SMS_PROVIDER', 'SMS_FROM', 'SAMPLEON_URL', 'SAMPLEON_CLIENT_SECRET', 'SAMPLEON_OUTCOME_SECRET']) delete process.env[k];
   process.env.DEEPGRAM_MODEL = 'env-model';
 });
 
@@ -29,11 +29,15 @@ import { TranscriptionService } from '../src/captures/transcription.service';
 import { FileStore, LocalFileStore, S3FileStore, type SwitchingFileStore } from '../src/jobs/file-store';
 import { integration } from '../src/platform/integrations';
 import { twilioSignature } from '../src/cati/telephony.service';
+import { emailProvider } from '../src/distribution/mailer';
+import { smsProvider } from '../src/distribution/sms';
+import { SampleonService } from '../src/sampleon/sampleon.service';
 
 const run = `m21${Date.now().toString(36)}`;
 const IPINFO_TOKEN = 'ipinfo-token-0123456789-secret';
 const CLAUDE_KEY = 'sk-ant-test-0123456789abcdef-SECRET'; // secret-scan:allow (fake test value)
 const SID = `AC${'2'.repeat(32)}`;
+const SENDGRID_KEY = 'SG.test-0123456789abcdef-SECRET'; // secret-scan:allow (fake test value)
 
 let app: ApiApp;
 let http: ReturnType<typeof request>;
@@ -74,6 +78,12 @@ beforeAll(async () => {
       return req.headers.authorization === 'Token dg-key-0123456789abcdef' ? json(200, { projects: [] }) : json(401, {});
     if (url.startsWith(`/2010-04-01/Accounts/${SID}.json`)) return json(200, { sid: SID, status: 'active' });
     if (url.startsWith(`/2010-04-01/Accounts/${SID}/IncomingPhoneNumbers.json`)) return json(200, { incoming_phone_numbers: [{}] });
+    if (url === '/v3/scopes')
+      return req.headers.authorization === `Bearer ${SENDGRID_KEY}` ? json(200, { scopes: ['mail.send'] }) : json(401, { errors: [{ message: 'bad key' }] });
+    if (url === '/api/v1/attributes')
+      return req.headers['x-sampledge-client'] === 'zapx' && String(req.headers['x-sampledge-signature'] ?? '').startsWith('v1=')
+        ? json(200, { attributes: [] })
+        : json(401, {});
     if (url.startsWith('/v1/prices/'))
       return url.endsWith('price_gone') ? json(404, { error: { message: 'No such price' } }) : json(200, { active: true });
     json(404, {});
@@ -128,7 +138,7 @@ describe('who can manage integrations', () => {
 
   it('lists every integration with where each value comes from', async () => {
     const list = (await http.get('/api/platform/integrations').set(admin).expect(200)).body.integrations;
-    expect(list.map((i: { key: string }) => i.key)).toEqual(['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3']);
+    expect(list.map((i: { key: string }) => i.key)).toEqual(['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3', 'sendgrid', 'sampleon']);
     const dg = list.find((i: { key: string }) => i.key === 'deepgram');
     expect(dg).toMatchObject({ enabled: false, source: 'env' });
     expect(dg.fields.find((f: { name: string }) => f.name === 'model')).toMatchObject({
@@ -321,5 +331,54 @@ describe('providers follow the CRM without a restart', () => {
         .expect(200)
     ).body;
     expect(cleared.fields.find((f: { name: string }) => f.name === 'model')).toMatchObject({ origin: 'env', value: 'env-model' });
+  });
+});
+
+describe('email, SMS and SampAudience are set in the CRM too (no environment variables)', () => {
+  it('SendGrid: saving the key and sender turns email on, sealed and tested', async () => {
+    expect(emailProvider()).toBeNull();
+    const saved = (
+      await http
+        .put('/api/platform/integrations/sendgrid')
+        .set(admin)
+        .send({ enabled: true, values: { apiKey: SENDGRID_KEY, fromEmail: 'surveys@operator.test' } })
+        .expect(200)
+    ).body;
+    expect(saved).toMatchObject({ enabled: true, source: 'crm' });
+    expect(JSON.stringify(saved)).not.toContain(SENDGRID_KEY);
+    const row = await prisma.platformIntegration.findUniqueOrThrow({ where: { key: 'sendgrid' } });
+    expect(JSON.stringify(row)).not.toContain(SENDGRID_KEY);
+    expect(emailProvider()).not.toBeNull();
+    const t = (await http.post('/api/platform/integrations/sendgrid/test').set(admin).send({}).expect(200)).body;
+    expect(t.ok).toBe(true);
+  });
+
+  it('SMS: a sender saved with the Twilio account turns SMS on', async () => {
+    await http
+      .put('/api/platform/integrations/twilio')
+      .set(admin)
+      .send({ enabled: true, values: { accountSid: SID, authToken: 'tw-token-0123456789abcdef', callerId: '+442071234567', smsFrom: '+447700900123' } })
+      .expect(200);
+    expect(smsProvider()).not.toBeNull();
+    await http.put('/api/platform/integrations/twilio').set(admin).send({ enabled: true, values: {}, clear: ['smsFrom'] }).expect(200);
+    expect(smsProvider()).toBeNull();
+  });
+
+  it('SampAudience: the connection comes from the CRM and its test signs a request', async () => {
+    expect(SampleonService.configured()).toBe(false);
+    const saved = (
+      await http
+        .put('/api/platform/integrations/sampleon')
+        .set(admin)
+        .send({ enabled: true, values: { url: 'http://127.0.0.1:5296', clientSecret: 'sa-secret-0123456789abcdef', outcomeSecret: 'sa-outcome-0123456789abcdef' } })
+        .expect(200)
+    ).body;
+    expect(saved.callbacks[0].url).toMatch(/\/api\/v1\/sampleon\/events$/);
+    expect(SampleonService.configured()).toBe(true);
+    expect(SampleonService.connection()).toMatchObject({ SAMPLEON_URL: 'http://127.0.0.1:5296', SAMPLEON_CLIENT_ID: 'zapx', SAMPLEON_OUTCOME_SECRET: 'sa-outcome-0123456789abcdef' });
+    const t = (await http.post('/api/platform/integrations/sampleon/test').set(admin).send({}).expect(200)).body;
+    expect(t.ok).toBe(true);
+    await http.delete('/api/platform/integrations/sampleon').set(admin).expect(200);
+    expect(SampleonService.configured()).toBe(false);
   });
 });

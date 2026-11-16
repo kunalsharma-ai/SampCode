@@ -8,6 +8,7 @@
  * Tested against a local stand-in of the SendGrid API only.
  */
 import { config } from '../config';
+import { integration } from '../platform/integrations';
 
 export interface OutgoingEmail {
   to: { email: string; name?: string | null };
@@ -56,9 +57,12 @@ export class SendGridProvider implements EmailProvider {
   }
 }
 
-/** The configured provider, or null when sending is off. */
+/**
+ * The configured provider, or null when sending is off. The SendGrid key and sender come from
+ * Settings > Integrations (or EMAIL_PROVIDER=sendgrid and the SENDGRID_* variables until it is saved).
+ */
 export function emailProvider(): EmailProvider | null {
-  const c = config();
-  if (c.EMAIL_PROVIDER !== 'sendgrid') return null;
-  return new SendGridProvider(c.SENDGRID_API_KEY, c.SENDGRID_API_BASE, { email: c.EMAIL_FROM, name: c.EMAIL_FROM_NAME });
+  const e = integration('sendgrid');
+  if (!e.enabled) return null;
+  return new SendGridProvider(e.values.apiKey!, config().SENDGRID_API_BASE, { email: e.values.fromEmail!, name: e.values.fromName || 'SampCode surveys' });
 }

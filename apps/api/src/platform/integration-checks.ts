@@ -4,6 +4,7 @@
  * browser, so this cannot be used to make the server call arbitrary addresses.
  */
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import { sampledgeServiceHeaders } from '@zapx/redirect-core';
 import { config } from '../config';
 import type { IntegrationKey } from './integrations';
 
@@ -119,6 +120,31 @@ const CHECKS: Record<IntegrationKey, Checker> = {
     } finally {
       client.destroy();
     }
+  },
+
+  async sendgrid(v) {
+    // Lists the key's permissions: read-only, and shows whether it may send mail.
+    const r = await call(`${base(config().SENDGRID_API_BASE)}/v3/scopes`, { headers: { Authorization: `Bearer ${v.apiKey}` } });
+    if (r.status !== 200) return { ok: false, message: `${refused('SendGrid', r.status)} ${errorText(r.body)}`.trim() };
+    const scopes = (r.body.scopes as string[] | undefined) ?? [];
+    if (!scopes.includes('mail.send')) return { ok: false, message: 'The key works but has no Mail Send permission. Create one with Mail Send in SendGrid.' };
+    return { ok: true, message: `Connected. The key may send mail from ${v.fromEmail}.` };
+  },
+
+  async sampleon(v) {
+    // A signed read of the attribute catalogue: 200 means the address, client id and secret are right.
+    const path = '/api/v1/attributes';
+    const res = await fetch(`${base(v.url!)}${path}`, {
+      headers: sampledgeServiceHeaders({ clientId: v.clientId || 'zapx', secret: v.clientSecret!, method: 'GET', path, body: '' }),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) return { ok: false, message: 'SampAudience refused the signature: check the client id and signing secret.' };
+    if (res.status !== 200) return { ok: false, message: `SampAudience answered HTTP ${res.status}.` };
+    return {
+      ok: true,
+      message: `Connected to SampAudience at ${new URL(v.url!).host}.${v.outcomeSecret ? '' : ' Add the outcome secret before sending audiences.'}`,
+    };
   },
 };
 

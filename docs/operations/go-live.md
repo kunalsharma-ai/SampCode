@@ -58,7 +58,7 @@ once DNS points at the server. Then open `https://<STUDIO_DOMAIN>`.
 
 ## Integrations are set up in the CRM
 
-Every third-party service is connected from inside SampCode, not by editing server settings. An
+Every third-party service and API key is connected from inside SampCode, not by editing server settings; only the database address and the server's own keys (`JWT_SECRET`, `SECRETS_KEY`, `SIGNING_KEYS_SECRET`) stay in the environment. An
 administrator of the organization that runs the installation (the first organization created; hand
 it over with `node apps/api/dist/cli/set-operator.js <member email>`) opens **Settings →
 Integrations**, pastes the key, presses **Test connection**, ticks **Turn on** and saves. The change
@@ -72,6 +72,9 @@ reaches every server and the background worker within 15 seconds, with no restar
 | Twilio      | Account SID, auth token, a voice number; the callback address defaults to studio | console.twilio.com → Account info, Phone numbers                      |
 | Stripe      | Secret key, webhook signing secret, plan prices (`{"team":"price_..."}`)         | dashboard.stripe.com → Developers; add the webhook URL the page shows |
 | Amazon S3   | Bucket, region and access keys (only when files go to S3 instead of the server)  | The S3 console                                                        |
+| SendGrid    | API key with Mail Send, a verified sender address and name                       | app.sendgrid.com → Settings → API keys, Sender Authentication          |
+| SMS         | Under Twilio: the SMS sender (number or Messaging Service SID)                   | console.twilio.com → Phone numbers / Messaging                        |
+| SampAudience | Its address, the signing secret and outcome secret SampAudience shows for client `zapx` | SampAudience console → Settings → Connected systems (events go to the address the page shows) |
 
 How it is kept safe:
 

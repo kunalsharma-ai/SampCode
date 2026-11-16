@@ -67,8 +67,11 @@ snapshot (by `sequence`).
 
 ## Settings
 
-`SAMPLEON_URL`, `SAMPLEON_CLIENT_ID` (default `zapx`), `SAMPLEON_CLIENT_SECRET`,
-`SAMPLEON_OUTCOME_SECRET` (see `.env.example`).
+In the CRM: **Settings → Integrations → SampAudience** (address, client id `zapx`, signing secret,
+outcome secret), stored sealed in the database. In SampAudience, add SampCode under Settings →
+Connected systems (kind SampCode, outcome secret "Create one") with the events address the CRM shows.
+The old `SAMPLEON_URL`, `SAMPLEON_CLIENT_ID`, `SAMPLEON_CLIENT_SECRET` and `SAMPLEON_OUTCOME_SECRET`
+variables are only a fallback.
 
 ## Tests
 
