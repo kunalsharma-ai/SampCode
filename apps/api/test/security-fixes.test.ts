@@ -25,6 +25,7 @@ import { PrismaService } from '../src/common/prisma.service';
 import { resetConfig } from '../src/config';
 import { tokenHash } from '../src/auth/password-reset.service';
 import { clearIntegrations, saveIntegration } from './support/integrations';
+import { RETIRED_ENV } from '../src/platform/installation-secrets';
 
 const run = `sec${Date.now().toString(36)}`;
 const password = 'correct-horse-battery';
@@ -256,11 +257,22 @@ describe('production compose file', () => {
   /** The block of one service: from its name to the next service at the same indentation. */
   const service = (name: string) => new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z-]+:\\n|\\nvolumes:)`).exec(compose)![1];
 
-  it('refuses to start without its own secrets, and ships none', () => {
-    for (const k of ['JWT_SECRET', 'SECRETS_KEY', 'SIGNING_KEYS_SECRET', 'MONGO_ROOT_PASSWORD', 'MONGO_APP_PASSWORD']) {
+  it('refuses to start without the database passwords, and ships none', () => {
+    for (const k of ['MONGO_ROOT_PASSWORD', 'MONGO_APP_PASSWORD']) {
       expect(compose).toContain(`\${${k}:?`);
       expect(example).toMatch(new RegExp(`^${k}=$`, 'm'));
     }
+  });
+
+  it('keeps no API key or app secret in .env.production (ADR 0043)', () => {
+    // The master key is made by the app-key service; JWT and signing secrets by the API, in the database.
+    for (const k of ['JWT_SECRET', 'SECRETS_KEY', 'SIGNING_KEYS_SECRET', ...RETIRED_ENV]) {
+      expect(example).not.toMatch(new RegExp(`^#? ?${k}=`, 'm'));
+      expect(compose).not.toContain(`\${${k}`);
+    }
+    expect(compose).toMatch(/^ {2}SECRETS_KEY_FILE: \/run\/sampcode-key\/secrets_key$/m);
+    expect(service('app-key')).toContain('/dev/urandom');
+    for (const s of ['api', 'worker']) expect(service(s)).toContain('appkey:/run/sampcode-key:ro');
   });
 
   it('fixes the settings production needs', () => {
