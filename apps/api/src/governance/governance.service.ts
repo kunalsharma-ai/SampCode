@@ -37,17 +37,18 @@ export function readRetention(raw: unknown): Retention {
 
 /** Services configured on this deployment that send organization data outside it. */
 export function externalProcessors() {
-  const c = config();
+  const twilio = integration('twilio');
   return [
     { id: 'ai', name: 'AI (Anthropic Claude)', on: integration('anthropic').enabled, blockable: true },
     { id: 'transcription', name: 'Transcription (Deepgram)', on: integration('deepgram').enabled, blockable: true },
     { id: 'network_reputation', name: 'Network reputation (IPinfo)', on: integration('ipinfo').enabled, blockable: true },
-    { id: 'email', name: 'Email (SendGrid)', on: c.EMAIL_PROVIDER === 'sendgrid', blockable: false },
-    { id: 'sms', name: 'SMS (Twilio)', on: c.SMS_PROVIDER === 'twilio', blockable: false },
-    { id: 'telephony', name: 'Phone dialer (Twilio)', on: integration('twilio').enabled, blockable: false },
+    { id: 'email', name: 'Email (SendGrid)', on: integration('sendgrid').enabled, blockable: false },
+    { id: 'sms', name: 'SMS (Twilio)', on: twilio.enabled && !!twilio.values.smsFrom, blockable: false },
+    { id: 'telephony', name: 'Phone dialer (Twilio)', on: twilio.enabled && !!twilio.values.callerId, blockable: false },
+    { id: 'sampaudience', name: 'Audience (SampAudience)', on: integration('sampleon').enabled, blockable: false },
     {
       id: 'file_store',
-      name: `File storage (S3, ${integration('s3').values.region ?? c.S3_REGION})`,
+      name: `File storage (S3${integration('s3').values.region ? `, ${integration('s3').values.region}` : ''})`,
       on: integration('s3').enabled,
       blockable: false,
     },

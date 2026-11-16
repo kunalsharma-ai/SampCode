@@ -1,9 +1,11 @@
 /**
  * "Test connection" for each platform integration: one cheap, read-only call that proves the key works.
- * The provider addresses come from the environment (they only change for tests), never from the
- * browser, so this cannot be used to make the server call arbitrary addresses.
+ * The provider addresses are fixed (the *_API_BASE variables only change them for tests), so this cannot
+ * be used to make the server call arbitrary addresses. The one exception is SampAudience, whose address
+ * is itself a setting only the platform operator's administrators and the super admin can change.
  */
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import { sampledgeServiceHeaders } from '@zapx/redirect-core';
 import { config } from '../config';
 import type { IntegrationKey } from './integrations';
 
@@ -70,8 +72,9 @@ const CHECKS: Record<IntegrationKey, Checker> = {
     });
     if (r.status !== 200) return { ok: false, message: refused('Twilio', r.status) };
     if (r.body.status && r.body.status !== 'active') return { ok: false, message: `The Twilio account is ${String(r.body.status)}.` };
+    if (!v.callerId) return { ok: true, message: `Connected.${v.smsFrom ? ` SMS will be sent from ${v.smsFrom}.` : ''}` };
     const n = await call(
-      `${base(config().TWILIO_API_BASE)}/2010-04-01/Accounts/${encodeURIComponent(v.accountSid!)}/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(v.callerId!)}`,
+      `${base(config().TWILIO_API_BASE)}/2010-04-01/Accounts/${encodeURIComponent(v.accountSid!)}/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(v.callerId)}`,
       { headers: { Authorization: auth } },
     );
     const own = Array.isArray(n.body.incoming_phone_numbers) && n.body.incoming_phone_numbers.length > 0;
@@ -81,6 +84,30 @@ const CHECKS: Record<IntegrationKey, Checker> = {
         ? `Connected. ${v.callerId} is a number on this account.`
         : `Connected. ${v.callerId} is not a number on this account; it works only if it is a verified caller ID in Twilio.`,
     };
+  },
+
+  async sendgrid(v) {
+    // Lists the key's permissions; nothing is sent.
+    const r = await call(`${base(config().SENDGRID_API_BASE)}/v3/scopes`, { headers: { Authorization: `Bearer ${v.apiKey}` } });
+    if (r.status !== 200) return { ok: false, message: refused('SendGrid', r.status) };
+    const scopes = Array.isArray(r.body.scopes) ? (r.body.scopes as string[]) : [];
+    if (scopes.length && !scopes.includes('mail.send'))
+      return { ok: false, message: 'The key works, but it does not have the "Mail Send" permission.' };
+    return { ok: true, message: `Connected. Emails will come from ${v.fromEmail}. Make sure that sender is verified in SendGrid.` };
+  },
+
+  // Nothing to call: the CDN proves the secret by sending it.
+  cdn: async () => ({ ok: true, message: 'Saved values are valid. Add the X-Zapx-Edge header with this secret to the CDN origin.' }),
+
+  async sampleon(v) {
+    // A signed request for an Audience Request that cannot exist: 404 proves the address and the client
+    // secret work, 401/403 that the secret is wrong. Nothing is created.
+    const path = '/api/v1/audience-requests/AR-00000000000000000000000000';
+    const headers = sampledgeServiceHeaders({ clientId: v.clientId || 'zapx', secret: v.clientSecret!, method: 'GET', path, body: '' });
+    const r = await call(`${base(v.url!)}${path}`, { headers, redirect: 'manual' });
+    if (r.status === 401 || r.status === 403) return { ok: false, message: refused('SampAudience', r.status) };
+    if (r.status >= 500) return { ok: false, message: `SampAudience answered HTTP ${r.status}.` };
+    return { ok: true, message: 'Connected. SampAudience accepted the signed request.' };
   },
 
   async stripe(v) {

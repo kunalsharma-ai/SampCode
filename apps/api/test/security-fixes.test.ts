@@ -10,9 +10,6 @@ vi.hoisted(() => {
   process.env.JOB_WORKER = 'off';
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
   process.env.LOGIN_RATE_PER_MINUTE = '100';
-  process.env.EMAIL_PROVIDER = 'sendgrid';
-  process.env.SENDGRID_API_KEY = 'test-key';
-  process.env.EMAIL_FROM = 'noreply@test.zapx';
   // Replaced with the local stand-in's address in beforeAll (config is read lazily).
   process.env.SENDGRID_API_BASE = 'http://127.0.0.1:9';
 });
@@ -27,6 +24,7 @@ import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { resetConfig } from '../src/config';
 import { tokenHash } from '../src/auth/password-reset.service';
+import { clearIntegrations, saveIntegration } from './support/integrations';
 
 const run = `sec${Date.now().toString(36)}`;
 const password = 'correct-horse-battery';
@@ -70,6 +68,8 @@ beforeAll(async () => {
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
+  // Email is set up in Settings > Integrations (ADR 0043).
+  await saveIntegration(prisma, 'sendgrid', { apiKey: 'test-key', fromEmail: 'noreply@test.zapx' });
   const reg = await http
     .post('/api/auth/register')
     .send({ organization: `Org ${run}`, name: 'Admin', email: `admin-${run}@test.zapx`, password })
@@ -78,6 +78,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (prisma) await clearIntegrations(prisma, 'sendgrid');
   await app?.close();
   await new Promise<void>((r) => (mailServer ? mailServer.close(() => r()) : r()));
 });

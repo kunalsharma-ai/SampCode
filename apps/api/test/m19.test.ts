@@ -13,12 +13,7 @@ vi.hoisted(() => {
   process.env.CALLBACK_WORKER = 'off';
   process.env.JOB_WORKER = 'off';
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
-  process.env.TELEPHONY = 'twilio';
-  process.env.TWILIO_ACCOUNT_SID = `AC${'1'.repeat(32)}`;
-  process.env.TWILIO_AUTH_TOKEN = 'test-auth-token';
-  process.env.TWILIO_CALLER_ID = '+442070000000';
   process.env.TWILIO_API_BASE = 'http://127.0.0.1:5291';
-  process.env.TELEPHONY_WEBHOOK_BASE = 'https://zapx.test/api';
 });
 
 import { randomBytes } from 'node:crypto';
@@ -30,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp, type ApiApp } from '../src/http/app';
 import { PrismaService } from '../src/common/prisma.service';
 import { TelephonyService, TwilioProvider, twilioSignature } from '../src/cati/telephony.service';
+import { clearIntegrations, saveIntegration } from './support/integrations';
 
 const demo = JSON.parse(readFileSync(join(__dirname, '../../../docs/examples/demo-screener.json'), 'utf8'));
 const run = `m19${Date.now().toString(36)}`;
@@ -125,6 +121,13 @@ beforeAll(async () => {
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
   telephony = app.get(TelephonyService);
+  // The Twilio account is saved in Settings > Integrations (ADR 0043).
+  await saveIntegration(prisma, 'twilio', {
+    accountSid: SID,
+    authToken: 'test-auth-token',
+    callerId: '+442070000000',
+    webhookBase: 'https://zapx.test/api',
+  });
   const reg = await http
     .post('/api/auth/register')
     .send({ organization: `Org ${run}`, name: 'Admin', email: `admin-${run}@test.zapx`, password: 'correct-horse-battery' });
@@ -140,6 +143,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (prisma) await clearIntegrations(prisma, 'twilio');
   await app?.close();
   await new Promise((r) => twilio?.close(r));
 });

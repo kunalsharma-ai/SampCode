@@ -60,15 +60,16 @@ description. SampAudience drafts criteria from a description; nothing is sent to
 person approves in SampAudience. `GET /api/surveys/{id}/sampleon` lists the requests and the launch
 URL.
 
-SampAudience's events are signed (`X-Sampledge-*`, client `sampleon`, `SAMPLEON_CLIENT_SECRET`) over
+SampAudience's events are signed (`X-Sampledge-*`, client `sampleon`, the client secret) over
 the raw body, deduplicated by `eventId`, and move the row through `submitted → feasibility_ready →
 approved → soft_launch/live → closed`, with completes and the latest `project.quota_updated`
 snapshot (by `sequence`).
 
 ## Settings
 
-`SAMPLEON_URL`, `SAMPLEON_CLIENT_ID` (default `zapx`), `SAMPLEON_CLIENT_SECRET`,
-`SAMPLEON_OUTCOME_SECRET` (see `.env.example`).
+Settings → Integrations → SampAudience (stored encrypted in the database, ADR 0043): the SampAudience
+address, the client ID (default `zapx`), the client secret and the outcome secret. **Test connection**
+sends one signed request that cannot create anything.
 
 ## Tests
 
