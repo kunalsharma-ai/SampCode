@@ -58,10 +58,13 @@ export class TwilioSmsProvider implements SmsProvider {
 /** The configured provider, or null when SMS is off. */
 export function smsProvider(): SmsProvider | null {
   const c = config();
-  if (c.SMS_PROVIDER !== 'twilio') return null;
-  // The Twilio account comes from Settings > Integrations (or the TWILIO_* variables until it is set).
-  const t = integration('twilio').values;
-  return new TwilioSmsProvider(t.accountSid, t.authToken, c.TWILIO_API_BASE, c.SMS_FROM);
+  // The Twilio account and the SMS sender come from Settings > Integrations (or the TWILIO_* and
+  // SMS_* variables until it is set). A sender saved there turns SMS on.
+  const tw = integration('twilio');
+  const t = tw.values;
+  const on = tw.origins.smsFrom === 'crm' ? tw.switchedOn : c.SMS_PROVIDER === 'twilio';
+  if (!on || !t.accountSid || !t.authToken || !t.smsFrom) return null;
+  return new TwilioSmsProvider(t.accountSid, t.authToken, c.TWILIO_API_BASE, t.smsFrom);
 }
 
 /** Phone numbers are stored in E.164. Accepts spaces, dashes, dots and brackets; needs the leading +. */

@@ -11,13 +11,14 @@
  * Secrets are sealed with SecretBox (AES-256-GCM, key from SECRETS_KEY) and are never sent back to the
  * browser: the CRM only learns whether a secret is set and its last four characters.
  *
- * Infrastructure settings (database, JWT_SECRET, SECRETS_KEY itself, worker switches, proxies, the CDN
- * secret and the AWS resources) stay in the environment: see docs/operations/go-live.md.
+ * Every outside API key lives here (anthropic, ipinfo, deepgram, twilio, stripe, s3, sendgrid and the
+ * SampAudience connection). Only infrastructure settings stay in the environment: the database,
+ * JWT_SECRET, SECRETS_KEY itself, worker switches, proxies and the CDN secret (docs/operations/go-live.md).
  */
 import { z } from 'zod';
 import { config, type AppConfig } from '../config';
 
-export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3'] as const;
+export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3', 'sendgrid', 'sampleon'] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 export const isIntegrationKey = (k: string): k is IntegrationKey => (INTEGRATION_KEYS as readonly string[]).includes(k);
 
@@ -44,7 +45,7 @@ export interface FieldDef {
 export interface IntegrationDef {
   key: IntegrationKey;
   name: string;
-  category: 'AI' | 'Data quality' | 'Interviews' | 'Billing' | 'Storage';
+  category: 'AI' | 'Data quality' | 'Interviews' | 'Billing' | 'Storage' | 'Email' | 'Sampledge';
   purpose: string;
   /** What leaves SampCode when it is on (shown next to the switch). */
   privacy: string;
@@ -81,7 +82,101 @@ const pattern = (re: RegExp, message: string) => (v: string) => (re.test(v) ? nu
 const maxLen = (n: number) => (v: string) => (v.length <= n ? null : `must be at most ${n} characters`);
 const jsonOrEmpty = (o: object) => (Object.keys(o).length ? JSON.stringify(o) : undefined);
 
+const SENDGRID: IntegrationDef = {
+  key: 'sendgrid',
+  name: 'SendGrid (email)',
+  category: 'Email',
+  purpose: 'Sends survey invitations, reminders, password resets and scheduled reports by email.',
+  privacy: "Recipients' email addresses and the message text are sent to SendGrid.",
+  signupUrl: 'https://app.sendgrid.com/settings/api_keys',
+  envEnabled: (c) => c.EMAIL_PROVIDER === 'sendgrid',
+  fields: [
+    {
+      name: 'apiKey',
+      label: 'API key',
+      help: 'A key with Mail Send permission.',
+      secret: true,
+      required: true,
+      placeholder: 'SG.…',
+      env: 'SENDGRID_API_KEY',
+      fromEnv: (c) => c.SENDGRID_API_KEY || undefined,
+      check: maxLen(300),
+    },
+    {
+      name: 'fromEmail',
+      label: 'From address',
+      help: 'A sender verified in SendGrid (Sender Authentication).',
+      required: true,
+      placeholder: 'surveys@yourcompany.com',
+      env: 'EMAIL_FROM',
+      fromEnv: (c) => c.EMAIL_FROM || undefined,
+      check: pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, 'is not an email address'),
+    },
+    {
+      name: 'fromName',
+      label: 'From name',
+      env: 'EMAIL_FROM_NAME',
+      fromEnv: (c) => c.EMAIL_FROM_NAME,
+      fallback: () => 'SampCode surveys',
+      check: maxLen(100),
+    },
+  ],
+};
+
+const SAMPLEON: IntegrationDef = {
+  // The key and SAMPLEON_* variables keep the technical id; people see SampAudience.
+  key: 'sampleon',
+  name: 'SampAudience (audiences and invitations)',
+  category: 'Sampledge',
+  purpose: 'Sends audience requests for independent surveys to SampAudience and receives its signed progress events.',
+  privacy: 'Survey ids, targets and launch links are sent to SampAudience; respondents arrive with a SampAudience token only.',
+  signupUrl: '',
+  envEnabled: (c) => !!c.SAMPLEON_URL,
+  callbacks: (c) => [{ label: 'Events address to give SampAudience (Connected systems)', url: `${c.STUDIO_URL.replace(/\/$/, '')}/api/v1/sampleon/events` }],
+  fields: [
+    {
+      name: 'url',
+      label: 'SampAudience address',
+      required: true,
+      placeholder: 'https://audience.sampledge.com',
+      env: 'SAMPLEON_URL',
+      fromEnv: (c) => c.SAMPLEON_URL,
+      check: pattern(/^https?:\/\/[^/\s@]+(\/\S*)?$/, 'must be an http(s) address'),
+    },
+    {
+      name: 'clientId',
+      label: 'Client id at SampAudience',
+      help: 'The id SampCode is registered under in SampAudience → Settings → Connected systems.',
+      env: 'SAMPLEON_CLIENT_ID',
+      fromEnv: (c) => c.SAMPLEON_CLIENT_ID,
+      fallback: () => 'zapx',
+      check: pattern(/^[A-Za-z0-9_.-]{1,64}$/, 'may use letters, digits, . _ and -'),
+    },
+    {
+      name: 'clientSecret',
+      label: 'Signing secret',
+      help: 'Shown once by SampAudience when SampCode is added there. Signs every call and checks the events it sends back.',
+      secret: true,
+      required: true,
+      env: 'SAMPLEON_CLIENT_SECRET',
+      fromEnv: (c) => c.SAMPLEON_CLIENT_SECRET,
+      check: maxLen(500),
+    },
+    {
+      name: 'outcomeSecret',
+      label: 'Outcome secret',
+      help: 'The outcome secret SampAudience shows for SampCode (create one there). Confirms completes server to server.',
+      secret: true,
+      env: 'SAMPLEON_OUTCOME_SECRET',
+      fromEnv: (c) => c.SAMPLEON_OUTCOME_SECRET,
+      check: maxLen(500),
+    },
+  ],
+};
+
 export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
+  sendgrid: SENDGRID,
+  sampleon: SAMPLEON,
   anthropic: {
     key: 'anthropic',
     name: 'Claude (Anthropic)',
@@ -238,6 +333,15 @@ export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
         fromEnv: (c) => c.TELEPHONY_WEBHOOK_BASE,
         fallback: (c) => `${c.STUDIO_URL.replace(/\/$/, '')}/api`,
         check: pattern(/^https?:\/\/[^/\s]+(\/\S*)?$/, 'must be a URL'),
+      },
+      {
+        name: 'smsFrom',
+        label: 'Send survey links by SMS from (optional)',
+        help: 'A Twilio number in international form or a Messaging Service SID (MG…). Set it to turn on SMS invitations.',
+        placeholder: '+447700900123',
+        env: 'SMS_FROM',
+        fromEnv: (c) => c.SMS_FROM,
+        check: pattern(/^(\+[1-9][0-9]{6,14}|MG[0-9a-fA-F]{32})$/, 'must be a number like +447700900123 or a Messaging Service SID'),
       },
     ],
   },

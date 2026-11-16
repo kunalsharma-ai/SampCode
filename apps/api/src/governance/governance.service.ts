@@ -42,7 +42,7 @@ export function externalProcessors() {
     { id: 'ai', name: 'AI (Anthropic Claude)', on: integration('anthropic').enabled, blockable: true },
     { id: 'transcription', name: 'Transcription (Deepgram)', on: integration('deepgram').enabled, blockable: true },
     { id: 'network_reputation', name: 'Network reputation (IPinfo)', on: integration('ipinfo').enabled, blockable: true },
-    { id: 'email', name: 'Email (SendGrid)', on: c.EMAIL_PROVIDER === 'sendgrid', blockable: false },
+    { id: 'email', name: 'Email (SendGrid)', on: integration('sendgrid').enabled, blockable: false },
     { id: 'sms', name: 'SMS (Twilio)', on: c.SMS_PROVIDER === 'twilio', blockable: false },
     { id: 'telephony', name: 'Phone dialer (Twilio)', on: integration('twilio').enabled, blockable: false },
     {

@@ -6,6 +6,7 @@ import { compare, hash, hashSync } from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
+import { integration } from '../platform/integrations';
 import { type PrismaService } from '../common/prisma.service';
 import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
@@ -202,7 +203,7 @@ export class AuthController {
 
   /** Whether "forgot password" can send email, so the sign-in page can say what will happen. */
   passwordOptions() {
-    return { forgotPasswordEmail: config().EMAIL_PROVIDER !== 'off' };
+    return { forgotPasswordEmail: integration('sendgrid').enabled };
   }
 
   /** Sets a new password from a reset link. Signs out every session; the member then signs in. */

@@ -15,6 +15,7 @@ import { type AuditService } from '../common/audit.service';
 import { type PrismaService } from '../common/prisma.service';
 import { parseBody } from '../common/validation';
 import { config } from '../config';
+import { integration } from '../platform/integrations';
 import { type SecretBox } from '../platform/secret-box';
 import { type SurveysService } from '../surveys/surveys.service';
 
@@ -90,9 +91,20 @@ export class SampleonService {
     private readonly box: SecretBox,
   ) {}
 
+  /** The SampAudience connection: Settings > Integrations, else the SAMPLEON_* variables. */
+  static connection() {
+    const s = integration('sampleon');
+    return {
+      SAMPLEON_URL: s.values.url || undefined,
+      SAMPLEON_CLIENT_ID: s.values.clientId || 'zapx',
+      SAMPLEON_CLIENT_SECRET: s.values.clientSecret || undefined,
+      SAMPLEON_OUTCOME_SECRET: s.values.outcomeSecret || undefined,
+      enabled: s.enabled,
+    };
+  }
+
   static configured() {
-    const c = config();
-    return !!(c.SAMPLEON_URL && c.SAMPLEON_CLIENT_SECRET);
+    return SampleonService.connection().enabled;
   }
 
   /** Where SAMPLEON sends respondents. SAMPLEON replaces {token} with its session token. */
@@ -114,7 +126,7 @@ export class SampleonService {
    * SAMPLEON as a redirect plus a signed S2S confirmation (redirect-core sampleonAdapter).
    */
   async ensureVendor(user: AuthUser, projectId: string) {
-    const c = config();
+    const c = SampleonService.connection();
     const existing = await this.prisma.vendor.findFirst({ where: { projectId, code: SAMPLEON_VENDOR_CODE, tenantId: user.tenantId } });
     if (existing) {
       if (existing.deletedAt)
@@ -123,7 +135,7 @@ export class SampleonService {
         throw new ConflictException(`Vendor code ${SAMPLEON_VENDOR_CODE} is already used by another vendor in this project`);
       return existing;
     }
-    if (!c.SAMPLEON_OUTCOME_SECRET) throw new ServiceUnavailableException('SAMPLEON_OUTCOME_SECRET is not set');
+    if (!c.SAMPLEON_OUTCOME_SECRET) throw new ServiceUnavailableException('The SampAudience outcome secret is not set: enter it under Settings > Integrations > SampAudience');
     const vendor = await this.prisma.vendor.create({
       data: {
         tenantId: user.tenantId,
@@ -168,7 +180,7 @@ export class SampleonService {
       loiMinutes: input.loiMinutes,
       reward: input.reward,
       fieldwork: input.fieldwork,
-      survey: { launchUrl: SampleonService.launchUrl(survey.id), language: input.language, hostId: config().SAMPLEON_CLIENT_ID },
+      survey: { launchUrl: SampleonService.launchUrl(survey.id), language: input.language, hostId: SampleonService.connection().SAMPLEON_CLIENT_ID },
       redirects: { allowRouting: input.allowRouting },
       ...(input.exclusions ? { exclusions: input.exclusions } : {}),
     };
@@ -196,7 +208,7 @@ export class SampleonService {
 
   /** Signed call to SAMPLEON. SAMPLEON's 4xx answers are passed on; anything else is a 502. */
   private async call(method: 'GET' | 'POST', path: string, body: unknown, idempotencyKey?: string): Promise<unknown> {
-    const c = config();
+    const c = SampleonService.connection();
     const text = body === undefined ? '' : JSON.stringify(body);
     let res: Response;
     try {
@@ -229,7 +241,7 @@ export class SampleonService {
 
   /** Signed SAMPLEON event webhook. Each event is applied once; unknown requests are acknowledged. */
   async receive(req: InboundRequest) {
-    const c = config();
+    const c = SampleonService.connection();
     if (!SampleonService.configured()) throw new ServiceUnavailableException('The SampAudience integration is not configured');
     const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? null));
     const reason = verifySampledgeRequest({
