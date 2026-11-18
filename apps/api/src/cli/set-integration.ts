@@ -7,7 +7,7 @@
  *   echo '{"apiKey":"..."}' | node apps/api/dist/cli/set-integration.js deepgram -     (keeps keys out of shell history)
  *   node apps/api/dist/cli/set-integration.js <key> --remove
  *
- * Keys: anthropic, ipinfo, deepgram, twilio, sendgrid, stripe, s3, sampleon, cdn. The field names are
+ * Keys: anthropic, ipinfo, deepgram, twilio, smtp, sendgrid, stripe, s3, sampleon, cdn. The field names are
  * the ones in apps/api/src/platform/integrations.ts (for example deepgram: apiKey, model).
  */
 import '../database-url';

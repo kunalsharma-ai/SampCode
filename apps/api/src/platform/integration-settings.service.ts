@@ -248,9 +248,12 @@ export class IntegrationSettingsService implements OnModuleInit, OnModuleDestroy
       values[f.name] = v;
     }
     const missing = def.fields.filter((f) => f.required && !values[f.name]);
+    const invalid = def.validate?.(values);
     const result = missing.length
       ? { ok: false, message: `Fill in ${missing.map((f) => f.label).join(', ')} first.` }
-      : await checkIntegration(key, values);
+      : invalid
+        ? { ok: false, message: invalid }
+        : await checkIntegration(key, values);
     await this.audit.record(user, 'platform.integration_tested', 'integration', key, { ok: result.ok, message: result.message });
     return { ...result, testedAt: new Date() };
   }

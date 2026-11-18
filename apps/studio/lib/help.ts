@@ -123,7 +123,7 @@ const entries = {
   },
   'page.integrations': {
     title: 'Integrations',
-    what: 'Connections to outside services that power features: Claude (AI), IPinfo (fraud checks), Deepgram (transcription), Twilio (calls and SMS), SendGrid (email), Stripe (billing), S3 (file storage), SampAudience (audiences) and an optional CDN. Every API key lives here, encrypted in the database, not in server files.',
+    what: 'Connections to outside services that power features: Claude (AI), IPinfo (fraud checks), Deepgram (transcription), Twilio (calls and SMS), SMTP email such as Zoho Mail or SendGrid (email), Stripe (billing), S3 (file storage), SampAudience (audiences) and an optional CDN. Every API key lives here, encrypted in the database, not in server files.',
     how: [
       'Open a service, paste its key and click "Test connection".',
       'Save; the feature that needs it switches on for everyone in the organization.',
