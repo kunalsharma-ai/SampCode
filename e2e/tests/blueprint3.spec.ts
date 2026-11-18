@@ -161,7 +161,7 @@ test('fieldwork evidence, back-checks, appeals and email invitations', async ({ 
   // --- Email invitations: contacts and a scheduled wave ---
   await page.getByRole('tab', { name: 'Distribution' }).click();
   const mail = page.getByTestId('email-invitations');
-  await expect(mail.getByTestId('email-off')).toContainText('Email sending is off on this server');
+  await expect(mail.getByTestId('email-off')).toContainText('Email sending is off');
   await mail
     .getByLabel(/Paste contacts as CSV/)
     .fill('email,name,region\nasha@example.com,Asha,North\nnot-an-email,Bob,South\nchen@example.com,Chen,East');

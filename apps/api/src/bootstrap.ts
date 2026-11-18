@@ -2,6 +2,7 @@ import { Logger } from './http/logger';
 import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { config } from './config';
+import { integration } from './platform/integrations';
 
 type EdgeRequest = { headers: Record<string, string | string[] | undefined>; ip?: string };
 
@@ -21,13 +22,15 @@ export function addressOnly(v: string): string | null {
  */
 export function edgeTrust(req: EdgeRequest) {
   const c = config();
-  if (!c.EDGE_SHARED_SECRET) return;
+  // The secret and the address header are set in Settings > Integrations > CDN (ADR 0043).
+  const edge = integration('cdn');
+  if (!edge.enabled) return;
   const sent = req.headers['x-zapx-edge'];
   delete req.headers['x-zapx-edge'];
   const a = Buffer.from(typeof sent === 'string' ? sent : '');
-  const b = Buffer.from(c.EDGE_SHARED_SECRET);
+  const b = Buffer.from(edge.values.sharedSecret!);
   const fromEdge = a.length === b.length && timingSafeEqual(a, b);
-  const addressHeader = c.EDGE_CLIENT_ADDRESS_HEADER;
+  const addressHeader = (edge.values.clientAddressHeader ?? '').toLowerCase();
   if (!fromEdge) {
     if (addressHeader) delete req.headers[addressHeader];
     if (c.GEO_COUNTRY_HEADER) delete req.headers[c.GEO_COUNTRY_HEADER];

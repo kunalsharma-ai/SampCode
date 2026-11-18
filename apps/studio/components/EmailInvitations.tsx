@@ -161,13 +161,13 @@ export function EmailInvitations({ surveyId, readOnly, live }: { surveyId: strin
       </p>
       {contacts && !contacts.emailEnabled ? (
         <p className="note small" role="status" data-testid="email-off">
-          Email sending is off on this server, so scheduled waves wait and nothing is sent. An administrator can turn it on with
-          EMAIL_PROVIDER=sendgrid. Meanwhile, download a wave&apos;s personal links and send them with your own email tool.
+          Email sending is off, so scheduled waves wait and nothing is sent. An administrator can turn it on in Settings › Integrations ›
+          SendGrid. Meanwhile, download a wave&apos;s personal links and send them with your own email tool.
         </p>
       ) : null}
       {contacts && !contacts.smsEnabled ? (
         <p className="note small" role="status" data-testid="sms-off">
-          SMS sending is off on this server, so SMS waves wait. An administrator can turn it on with SMS_PROVIDER=twilio and SMS_FROM.
+          SMS sending is off, so SMS waves wait. An administrator can turn it on in Settings › Integrations › Twilio (add an SMS sender).
         </p>
       ) : null}
       <ErrorNote error={error} />

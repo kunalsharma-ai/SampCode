@@ -534,6 +534,15 @@ model PlatformIntegration {
   updatedAt     DateTime @updatedAt
 }
 
+/// Secrets SampCode makes for itself on the first start (ADR 0043), so nobody has to generate them:
+/// one row, id "installation". `sealed` is a JSON object {"JWT_SECRET": "...", "SIGNING_KEYS_SECRET": "..."}
+/// sealed with SecretBox (SECRETS_KEY). An environment variable of the same name still wins.
+model InstallationSecret {
+  id        String   @id @map("_id")
+  sealed    String
+  createdAt DateTime @default(now())
+}
+
 model AuditEvent {
   id         String   @id @default(cuid()) @map("_id")
   tenantId   String

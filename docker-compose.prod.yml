@@ -22,14 +22,16 @@ x-restart: &restart
 # password goes into a URL as it is, so it must be letters and digits (openssl rand -hex 24).
 x-db-url: &db-url mongodb://${MONGO_APP_USER:?set MONGO_APP_USER}:${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD}@mongo:27017/zapx?authSource=admin&replicaSet=rs0&maxPoolSize=20
 
-# Every other setting (AI, email, telephony, S3, SampAudience, ...) comes from .env.production as it
-# is (env_file below); the values here are fixed for this deployment and win over that file.
+# No API key goes in .env.production (ADR 0043): Claude, email, telephony, S3, SampAudience and the
+# rest are entered in the studio (Settings > Integrations) and kept encrypted in MongoDB. The secrets
+# SampCode needs for itself are made on the first start: the master key (SECRETS_KEY) by the app-key
+# service below, into its own volume; JWT_SECRET and SIGNING_KEYS_SECRET by the API, into the database.
+# Optional run settings (LOG_LEVEL, ...) still come from .env.production (env_file below); the values
+# here are fixed for this deployment and win over that file.
 x-api-env: &api-env
   NODE_ENV: production
   DATABASE_URL: *db-url
-  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-  SECRETS_KEY: ${SECRETS_KEY:?set SECRETS_KEY}
-  SIGNING_KEYS_SECRET: ${SIGNING_KEYS_SECRET:?set SIGNING_KEYS_SECRET}
+  SECRETS_KEY_FILE: /run/sampcode-key/secrets_key
   STUDIO_URL: https://${STUDIO_DOMAIN:?set STUDIO_DOMAIN}
   RUNTIME_BASE_URL: https://${RUNTIME_DOMAIN:?set RUNTIME_DOMAIN}
   CAPI_APP_URL: https://${CAPI_DOMAIN:?set CAPI_DOMAIN}
@@ -47,6 +49,17 @@ services:
     command:
       - test -s /key/keyfile || head -c 756 /dev/urandom | base64 -w0 > /key/keyfile; chmod 400 /key/keyfile; chown 999:999 /key/keyfile
     volumes: [mongokey:/key]
+    restart: 'no'
+
+  # Writes SampCode's master key once (it encrypts every secret kept in the database). Keep a copy off
+  # the server: docs/operations/go-live.md shows how to print it. Without it a restored backup cannot
+  # open the saved API keys.
+  app-key:
+    image: mongo:8.0
+    entrypoint: ['sh', '-c']
+    command:
+      - test -s /key/secrets_key || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /key/secrets_key; chmod 400 /key/secrets_key; chown 1000:1000 /key/secrets_key
+    volumes: [appkey:/key]
     restart: 'no'
 
   # A one-member replica set (Prisma needs one for transactions) with a root user and the app user,
@@ -99,8 +112,9 @@ services:
       # The worker service below runs jobs, callbacks and webhooks.
       JOB_WORKER: 'off'
       CALLBACK_WORKER: 'off'
-    volumes: [files:/data/files]
+    volumes: [files:/data/files, 'appkey:/run/sampcode-key:ro']
     depends_on:
+      app-key: { condition: service_completed_successfully }
       migrate: { condition: service_completed_successfully }
 
   worker:
@@ -109,8 +123,9 @@ services:
     image: sampcode-worker:${TAG:-latest}
     env_file: *env-file
     environment: *api-env
-    volumes: [files:/data/files]
+    volumes: [files:/data/files, 'appkey:/run/sampcode-key:ro']
     depends_on:
+      app-key: { condition: service_completed_successfully }
       migrate: { condition: service_completed_successfully }
 
   studio:
@@ -170,6 +185,7 @@ services:
 volumes:
   mongodata:
   mongokey:
+  appkey:
   files:
   caddydata:
   caddyconfig:

@@ -269,7 +269,7 @@ export class PlatformAutomationService implements OnModuleInit, OnModuleDestroy 
       }
       case 'email_org_admins': {
         const provider = emailProvider();
-        if (!provider) return { type: a.type, ok: false, detail: 'Email sending is off (EMAIL_PROVIDER)' };
+        if (!provider) return { type: a.type, ok: false, detail: 'Email sending is off (Settings > Integrations > SendGrid)' };
         const admins = await this.prisma.user.findMany({
           where: { tenantId: m.tenantId, role: 'ADMIN', disabledAt: null },
           select: { email: true, name: true },

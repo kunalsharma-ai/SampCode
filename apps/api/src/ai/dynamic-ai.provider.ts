@@ -4,7 +4,7 @@ import { AiProvider, type ArchitectRequest, type ArchitectResult, type Translate
 import { ClaudeAiProvider, UnconfiguredAiProvider, aiSetupReason } from './claude.provider';
 
 /**
- * The AI provider set up in Settings > Integrations (or by ANTHROPIC_API_KEY and AI_MODEL until it is).
+ * The AI provider set up in Settings > Integrations.
  * Rebuilt when those settings change, so a new key works at once without a restart.
  */
 export class DynamicAiProvider extends AiProvider {

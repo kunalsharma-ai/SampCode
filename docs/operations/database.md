@@ -43,12 +43,12 @@ On a Docker Compose deployment the `backup` service runs `infra/scripts/backup.s
 `BACKUP_INTERVAL_HOURS` (24): a gzip `mongodump` archive of the `zapx` database in `BACKUP_DIR`
 (`./backups` next to the compose file), keeping the newest `BACKUP_KEEP` (14).
 
-| When                  | What                                                                                                                                                              |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daily                 | the `backup` service; then **copy `./backups` off the server** (rsync to another machine, or `aws s3 sync` / `rclone` to a bucket)                                |
-| Before risky releases | `docker compose -f docker-compose.prod.yml --env-file .env.production exec backup bash -c '/scripts/backup.sh /backups'`                                          |
-| Uploaded files        | the `files` volume: `docker run --rm -v sampcode_files:/f -v "$PWD/backups":/b alpine tar czf /b/files-$(date +%F).tgz -C /f .` (not needed with `FILE_STORE=s3`) |
-| Whole server          | a disk snapshot from the hosting provider, if it offers one                                                                                                       |
+| When                  | What                                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daily                 | the `backup` service; then **copy `./backups` off the server** (rsync to another machine, or `aws s3 sync` / `rclone` to a bucket)                                                    |
+| Before risky releases | `docker compose -f docker-compose.prod.yml --env-file .env.production exec backup bash -c '/scripts/backup.sh /backups'`                                                              |
+| Uploaded files        | the `files` volume: `docker run --rm -v sampcode_files:/f -v "$PWD/backups":/b alpine tar czf /b/files-$(date +%F).tgz -C /f .` (not needed with Settings → Integrations → Amazon S3) |
+| Whole server          | a disk snapshot from the hosting provider, if it offers one                                                                                                                           |
 
 Restore into the running stack (it replaces the `zapx` collections that are in the archive):
 

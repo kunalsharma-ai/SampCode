@@ -60,18 +60,16 @@ description. SampAudience drafts criteria from a description; nothing is sent to
 person approves in SampAudience. `GET /api/surveys/{id}/sampleon` lists the requests and the launch
 URL.
 
-SampAudience's events are signed (`X-Sampledge-*`, client `sampleon`, `SAMPLEON_CLIENT_SECRET`) over
+SampAudience's events are signed (`X-Sampledge-*`, client `sampleon`, the client secret) over
 the raw body, deduplicated by `eventId`, and move the row through `submitted → feasibility_ready →
 approved → soft_launch/live → closed`, with completes and the latest `project.quota_updated`
 snapshot (by `sequence`).
 
 ## Settings
 
-In the CRM: **Settings → Integrations → SampAudience** (address, client id `zapx`, signing secret,
-outcome secret), stored sealed in the database. In SampAudience, add SampCode under Settings →
-Connected systems (kind SampCode, outcome secret "Create one") with the events address the CRM shows.
-The old `SAMPLEON_URL`, `SAMPLEON_CLIENT_ID`, `SAMPLEON_CLIENT_SECRET` and `SAMPLEON_OUTCOME_SECRET`
-variables are only a fallback.
+Settings → Integrations → SampAudience (stored encrypted in the database, ADR 0043): the SampAudience
+address, the client ID (default `zapx`), the client secret and the outcome secret. **Test connection**
+sends one signed request that cannot create anything.
 
 ## Tests
 

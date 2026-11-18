@@ -105,7 +105,7 @@ letters) is stored with the response as `geoCountry`.
 
 ## VPN, proxy and data-centre check (Milestone 16)
 
-Off by default. With `NETWORK_REPUTATION=ipinfo` and an `IPINFO_TOKEN` whose IPinfo plan includes
+Off by default. With Settings → Integrations → IPinfo set up with an access token whose IPinfo plan includes
 privacy detection, SampCode asks IPinfo about each online respondent's address when the interview
 starts (only when the survey has quality and fraud checks on, never for test links or private
 addresses). Only the answer's words (`vpn`, `proxy`, `tor`, `relay`, `hosting`) are stored, as

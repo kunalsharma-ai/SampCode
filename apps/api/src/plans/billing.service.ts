@@ -52,7 +52,7 @@ export class BillingService {
     private readonly audit: AuditService,
   ) {}
 
-  /** On in Settings > Integrations (or BILLING=stripe until Stripe is saved there). */
+  /** On in Settings > Integrations. */
   enabled() {
     return integration('stripe').enabled;
   }
@@ -213,7 +213,7 @@ export class BillingService {
     const item = sub.items?.data?.[0];
     const paidPlan = this.planForPrice(item?.price?.id);
     const before = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-    const fallback = (integration('stripe').values.fallbackPlan || config().BILLING_FALLBACK_PLAN) as PlanCode;
+    const fallback = (integration('stripe').values.fallbackPlan || 'free') as PlanCode;
     const plan = PAID_STATUSES.has(sub.status) ? (paidPlan ?? before.plan) : fallback;
     const periodEnd = sub.current_period_end ?? item?.current_period_end;
     await this.prisma.tenant.update({

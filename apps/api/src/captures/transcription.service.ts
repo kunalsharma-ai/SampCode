@@ -74,7 +74,7 @@ export class TranscriptionService {
     this.provider = p;
   }
 
-  /** Built from Settings > Integrations (or TRANSCRIPTION and DEEPGRAM_*), rebuilt when they change. */
+  /** Built from Settings > Integrations, rebuilt when it changes. */
   private built?: { fingerprint: string; provider: SpeechToTextProvider | null };
 
   current(): SpeechToTextProvider | null {

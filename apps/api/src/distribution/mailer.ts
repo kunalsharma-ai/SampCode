@@ -1,7 +1,7 @@
 /**
  * Email sending for invitations and reminders (blueprint phase 3).
  *
- * - Off by default (EMAIL_PROVIDER=off): no email leaves SampCode.
+ * - Off until SendGrid is set up in Settings > Integrations: no email leaves SampCode.
  * - Provider: SendGrid v3 Mail Send (`POST /v3/mail/send`, 202 when accepted). Another provider is
  *   one class implementing EmailProvider.
  *
@@ -57,15 +57,9 @@ export class SendGridProvider implements EmailProvider {
   }
 }
 
-/**
- * The configured provider, or null when sending is off. The SendGrid key and sender come from
- * Settings > Integrations (or EMAIL_PROVIDER=sendgrid and the SENDGRID_* variables until it is saved).
- */
+/** The configured provider, or null when sending is off. */
 export function emailProvider(): EmailProvider | null {
-  const e = integration('sendgrid');
-  if (!e.enabled) return null;
-  return new SendGridProvider(e.values.apiKey!, config().SENDGRID_API_BASE, {
-    email: e.values.fromEmail!,
-    name: e.values.fromName || 'SampCode surveys',
-  });
+  const s = integration('sendgrid');
+  if (!s.enabled) return null;
+  return new SendGridProvider(s.values.apiKey!, config().SENDGRID_API_BASE, { email: s.values.fromEmail!, name: s.values.fromName! });
 }
