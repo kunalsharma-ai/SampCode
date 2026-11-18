@@ -1,6 +1,6 @@
 # 0035: Integrations are set up in the CRM
 
-Status: Accepted (2026-11-03)
+Status: Accepted (2026-11-03). The environment fallback was removed by [ADR 0043](0043-api-keys-in-the-database.md) (2026-11-16).
 
 ## Context
 

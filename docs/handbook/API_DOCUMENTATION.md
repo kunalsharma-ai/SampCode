@@ -55,7 +55,7 @@ Examples captured from the running API:
 | 409    | stale draft or page, duplicate (vendor code, email), live survey must be paused first                         |
 | 422    | publish blocked by the logic check / translations / missing media; respondent answers invalid                 |
 | 429    | rate limit, or account locked (`code: "ACCOUNT_LOCKED"`)                                                      |
-| 503    | AI not configured (no `ANTHROPIC_API_KEY` or `AI_MODEL`), or a provider switched off                          |
+| 503    | AI not configured (Claude not set up in Settings → Integrations), or a provider switched off                  |
 
 ## 2. Main flows with examples
 
@@ -102,7 +102,7 @@ curl -s -b cookie.txt -c cookie.txt -H 'x-zapx-csrf: 1' -H 'content-type: applic
   -d '{"currentPassword":"<current>","newPassword":"<new, 10+ characters>"}' localhost:4000/api/auth/change-password
 # → {"ok":true}  (and a new zapx_token cookie)
 
-# Administrator: one-time reset link for a member (also emailed when EMAIL_PROVIDER is set)
+# Administrator: one-time reset link for a member (also emailed when SendGrid is set up)
 curl -s -b cookie.txt -H 'x-zapx-csrf: 1' -X POST localhost:4000/api/users/<memberId>/password-reset
 # → {"url":"http://localhost:3000/reset-password?token=<token>","expiresAt":"…","emailed":false}
 

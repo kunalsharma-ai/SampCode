@@ -11,10 +11,6 @@ vi.hoisted(() => {
   process.env.JOB_WORKER = 'off';
   process.env.SIGNUP_RATE_PER_MINUTE = '100';
   process.env.SSO_ALLOW_INSECURE_ISSUER = 'true';
-  process.env.AWS_ACCESS_KEY_ID = 'AKIATESTZAPX';
-  process.env.AWS_SECRET_ACCESS_KEY = 'test-secret-not-real';
-  process.env.EDGE_SHARED_SECRET = 'edge-secret-for-tests-0123456789abcdef';
-  process.env.EDGE_CLIENT_ADDRESS_HEADER = 'x-test-viewer';
   process.env.GEO_COUNTRY_HEADER = 'x-test-country';
 });
 
@@ -28,6 +24,17 @@ import { config, resetConfig } from '../src/config';
 import { PrismaService } from '../src/common/prisma.service';
 import { FileNotFoundError, FileStore, S3FileStore, type SwitchingFileStore } from '../src/jobs/file-store';
 import { verifyStripeSignature } from '../src/plans/billing.service';
+import { clearIntegrations, saveIntegration } from './support/integrations';
+
+const EDGE_SECRET = 'edge-secret-for-tests-0123456789abcdef';
+const S3_VALUES = {
+  bucket: 'zapx-files-test',
+  prefix: 'zapx/test',
+  region: 'eu-west-1',
+  kmsKeyId: 'arn:aws:kms:eu-west-1:111122223333:key/test-key',
+  accessKeyId: 'AKIATESTZAPX',
+  secretAccessKey: 'test-secret-not-real',
+};
 import { databaseUrlFromParts } from '../src/database-url';
 import { addressOnly } from '../src/bootstrap';
 import { QualityService } from '../src/quality/quality.service';
@@ -91,24 +98,20 @@ const domain = `${run}.example`;
 beforeAll(async () => {
   s3 = await new MockS3().start();
   stripe = await new MockStripe().start();
-  Object.assign(process.env, {
-    FILE_STORE: 's3',
-    S3_BUCKET: 'zapx-files-test',
-    S3_PREFIX: 'zapx/test',
-    S3_REGION: 'eu-west-1',
-    S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:111122223333:key/test-key',
-    S3_ENDPOINT: s3.endpoint,
-    BILLING: 'stripe',
-    STRIPE_SECRET_KEY: 'sk_test_zapx_m13',
-    STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    STRIPE_PRICES: JSON.stringify({ team: 'price_team1', business: 'price_business1' }),
-    STRIPE_API_BASE: stripe.base,
-  });
+  Object.assign(process.env, { S3_ENDPOINT: s3.endpoint, STRIPE_API_BASE: stripe.base });
   resetConfig();
   app = createApp();
   await app.init();
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
+  // S3, Stripe and the CDN secret are saved in Settings > Integrations (ADR 0043).
+  await saveIntegration(prisma, 's3', S3_VALUES);
+  await saveIntegration(prisma, 'stripe', {
+    secretKey: 'sk_test_zapx_m13',
+    webhookSecret: WEBHOOK_SECRET,
+    prices: JSON.stringify({ team: 'price_team1', business: 'price_business1' }),
+  });
+  await saveIntegration(prisma, 'cdn', { sharedSecret: EDGE_SECRET, clientAddressHeader: 'x-test-viewer' });
   adminEmail = `admin-${run}@test.zapx`;
   const reg = await http
     .post('/api/auth/register')
@@ -120,27 +123,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (prisma) await clearIntegrations(prisma, 's3', 'stripe', 'cdn');
   await app?.close();
   await s3?.stop();
   await stripe?.stop();
-  for (const k of [
-    'FILE_STORE',
-    'S3_BUCKET',
-    'S3_PREFIX',
-    'S3_KMS_KEY_ID',
-    'S3_ENDPOINT',
-    'BILLING',
-    'STRIPE_SECRET_KEY',
-    'STRIPE_WEBHOOK_SECRET',
-    'STRIPE_PRICES',
-    'STRIPE_API_BASE',
-  ])
-    delete process.env[k];
+  for (const k of ['S3_ENDPOINT', 'STRIPE_API_BASE']) delete process.env[k];
   resetConfig();
 });
 
 describe('files in S3', () => {
-  it('the app uses the S3 store when FILE_STORE=s3 (and nothing is saved in the CRM)', () => {
+  it('the app uses the S3 store when it is saved in Settings > Integrations', () => {
     expect((app.get(FileStore) as SwitchingFileStore).current()).toBeInstanceOf(S3FileStore);
   });
 
@@ -178,19 +170,12 @@ describe('files in S3', () => {
   });
 
   it('uses SSE-S3 when no KMS key is set, and refuses s3 without a bucket', async () => {
-    process.env.S3_KMS_KEY_ID = '';
-    resetConfig();
-    const plain = new S3FileStore();
+    const plain = new S3FileStore(undefined, { ...S3_VALUES, kmsKeyId: undefined });
     await plain.put('t1/y/z', Buffer.from('a'));
     const last = s3.requests.filter((r) => r.method === 'PUT').at(-1)!;
     expect(last.headers['x-amz-server-side-encryption']).toBe('AES256');
     expect(last.headers['x-amz-server-side-encryption-aws-kms-key-id']).toBeUndefined();
-    process.env.S3_KMS_KEY_ID = 'arn:aws:kms:eu-west-1:111122223333:key/test-key';
-    process.env.S3_BUCKET = '';
-    resetConfig();
-    expect(() => config()).toThrow(/S3_BUCKET/);
-    process.env.S3_BUCKET = 'zapx-files-test';
-    resetConfig();
+    expect(() => new S3FileStore(undefined, { ...S3_VALUES, bucket: '' })).toThrow(/needs a bucket/);
   });
 });
 
@@ -605,7 +590,7 @@ describe('running on AWS', () => {
     await http.post(`/api/projects/${projectId}/vendors`).set(admin).send({ name: 'Panel', code: 'PN' }).expect(201);
 
     await start(`edge-${run}`, {
-      'X-Zapx-Edge': process.env.EDGE_SHARED_SECRET!,
+      'X-Zapx-Edge': EDGE_SECRET,
       'x-test-viewer': '198.51.100.7:4431',
       'x-test-country': 'DE',
     });

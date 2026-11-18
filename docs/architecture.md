@@ -213,7 +213,7 @@ Details: [modules/rich-media.md](modules/rich-media.md).
 
 ## Production readiness (Milestone 13)
 
-- **Files** go to S3 with `FILE_STORE=s3` (`S3FileStore`, SSE-KMS); local disk stays the default.
+- **Files** go to S3 with Settings → Integrations → Amazon S3 (`S3FileStore`, SSE-KMS); local disk stays the default.
 - **SAML 2.0** sign-in (`SamlService`) beside OpenID Connect, sharing account linking, domains,
   just-in-time roles and enforcement; requests are stored in `SsoRequest` and answered once.
 - **Billing** (`BillingService`, optional): Stripe Checkout and portal; signed webhooks re-read the
@@ -221,7 +221,7 @@ Details: [modules/rich-media.md](modules/rich-media.md).
 - **Deployment** (since 2026-11-09, ADR 0042): `docker-compose.prod.yml` on one server, Caddy for
   HTTPS in front, MongoDB as a replica set with passwords, a backup service. The AWS Terraform of this
   milestone was removed. The API still trusts viewer address and country only from an edge that sends
-  `EDGE_SHARED_SECRET`, for a CDN put in front later. [Guide](operations/go-live.md#deploying-with-docker-compose)
+  the CDN shared secret (Settings → Integrations → CDN), for a CDN put in front later. [Guide](operations/go-live.md#deploying-with-docker-compose)
 - **PROJEXA check** `scripts/projexa-check.mjs`. [ADR 0019](adr/0019-production-readiness.md)
 
 ## Edge protection, scaling and backups (Milestone 14)
@@ -240,12 +240,12 @@ Details: [modules/rich-media.md](modules/rich-media.md).
 
 Each is an interface with one first provider, off by default, tested against a local stand-in:
 
-| Milestone | Adapter                     | Setting                     | What it does                                                     | ADR                                    |
-| --------- | --------------------------- | --------------------------- | ---------------------------------------------------------------- | -------------------------------------- |
-| 16        | `NetworkReputationProvider` | `NETWORK_REPUTATION=ipinfo` | Flags VPN, proxy, Tor and data-centre networks (words only)      | [0022](adr/0022-network-reputation.md) |
-| 17        | `SpeechToTextProvider`      | `TRANSCRIPTION=deepgram`    | Transcribes interview recordings on request, as a job            | [0023](adr/0023-transcription.md)      |
-| 18        | (in the CATI queue)         | survey calling hours        | Calling hours per time zone and an organization do-not-call list | [0024](adr/0024-calling-rules.md)      |
-| 19        | `TelephonyProvider`         | `TELEPHONY=twilio`          | Click-to-call, hidden numbers, call recording                    | [0025](adr/0025-dialer.md)             |
+| Milestone | Adapter                     | Setting                            | What it does                                                     | ADR                                    |
+| --------- | --------------------------- | ---------------------------------- | ---------------------------------------------------------------- | -------------------------------------- |
+| 16        | `NetworkReputationProvider` | Settings → Integrations → IPinfo   | Flags VPN, proxy, Tor and data-centre networks (words only)      | [0022](adr/0022-network-reputation.md) |
+| 17        | `SpeechToTextProvider`      | Settings → Integrations → Deepgram | Transcribes interview recordings on request, as a job            | [0023](adr/0023-transcription.md)      |
+| 18        | (in the CATI queue)         | survey calling hours               | Calling hours per time zone and an organization do-not-call list | [0024](adr/0024-calling-rules.md)      |
+| 19        | `TelephonyProvider`         | Settings → Integrations → Twilio   | Click-to-call, hidden numbers, call recording                    | [0025](adr/0025-dialer.md)             |
 
 ## Security hardening (Milestone 20)
 
@@ -260,7 +260,7 @@ Each is an interface with one first provider, off by default, tested against a l
   and keeps this one: sessions carry their issue time in milliseconds (`iatMs`) so the new session is
   told apart from those issued earlier in the same second.
 - `POST /api/users/:id/password-reset` (admins) creates a one-time link; `POST /api/auth/forgot-password`
-  emails one when `EMAIL_PROVIDER` is set and always answers 204; `POST /api/auth/reset-password`
+  emails one when SendGrid is set up in Settings → Integrations and always answers 204; `POST /api/auth/reset-password`
   uses it. Only a SHA-256 hash of the token is stored (`PasswordReset`); a link works once, for
   `PASSWORD_RESET_HOURS`, and a newer link voids older ones. Code: `apps/api/src/auth/password-reset.service.ts`.
 - The vendor shared secret is returned only to admins and to super admins signed in with a session, never through an API key (`presentVendor`, `seesVendorSecret`; PR #43).
@@ -322,7 +322,7 @@ Each is an interface with one first provider, off by default, tested against a l
 
 ## Known limits
 
-- Files are on a shared local disk or in S3 (`FILE_STORE`); the S3 store is tested against a fake S3
+- Files are on a shared local disk or in S3 (the S3 integration); the S3 store is tested against a fake S3
   server, not AWS yet. Jobs are polled from the database (fine for hundreds an hour).
 - AI proposals return a full definition, so very long questionnaires may need to be imported in parts.
 - The Claude provider has been tested with a scripted fake; it needs an API key to be exercised live.

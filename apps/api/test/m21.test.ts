@@ -1,8 +1,9 @@
 /**
  * Integrations in the CRM: the platform operator's administrators set provider keys in
- * Settings > Integrations instead of the server environment. Only they can see or change them,
- * secrets are sealed and never sent back, every change and test is audited, the providers follow a
- * change without a restart, and clearing a value falls back to the environment.
+ * Settings > Integrations, the only place SampCode reads them from (ADR 0043: the old environment
+ * variables are ignored). Only they can see or change them, secrets are sealed and never sent back,
+ * every change and test is audited, the providers follow a change without a restart, and clearing a
+ * value returns it to its default.
  */
 import { vi } from 'vitest';
 
@@ -14,8 +15,14 @@ vi.hoisted(() => {
   // One local stand-in plays every provider.
   for (const k of ['ANTHROPIC_API_BASE', 'IPINFO_API_BASE', 'DEEPGRAM_API_BASE', 'TWILIO_API_BASE', 'STRIPE_API_BASE', 'SENDGRID_API_BASE'])
     process.env[k] = 'http://127.0.0.1:5296';
-  for (const k of ['NETWORK_REPUTATION', 'TRANSCRIPTION', 'TELEPHONY', 'BILLING', 'FILE_STORE', 'ANTHROPIC_API_KEY', 'EMAIL_PROVIDER', 'SENDGRID_API_KEY', 'EMAIL_FROM', 'SMS_PROVIDER', 'SMS_FROM', 'SAMPLEON_URL', 'SAMPLEON_CLIENT_SECRET', 'SAMPLEON_OUTCOME_SECRET']) delete process.env[k];
-  process.env.DEEPGRAM_MODEL = 'env-model';
+  // Retired variables (ADR 0043): set here to prove they are ignored.
+  Object.assign(process.env, {
+    TRANSCRIPTION: 'deepgram',
+    DEEPGRAM_API_KEY: 'dg-key-0123456789abcdef',
+    DEEPGRAM_MODEL: 'env-model',
+    ANTHROPIC_API_KEY: 'sk-ant-env-ignored', // secret-scan:allow (fake test value)
+    AI_MODEL: 'env-model',
+  });
 });
 
 import { createServer, type Server } from 'node:http';
@@ -29,15 +36,12 @@ import { TranscriptionService } from '../src/captures/transcription.service';
 import { FileStore, LocalFileStore, S3FileStore, type SwitchingFileStore } from '../src/jobs/file-store';
 import { integration } from '../src/platform/integrations';
 import { twilioSignature } from '../src/cati/telephony.service';
-import { emailProvider } from '../src/distribution/mailer';
-import { smsProvider } from '../src/distribution/sms';
-import { SampleonService } from '../src/sampleon/sampleon.service';
+import { retiredEnvInUse } from '../src/platform/installation-secrets';
 
 const run = `m21${Date.now().toString(36)}`;
 const IPINFO_TOKEN = 'ipinfo-token-0123456789-secret';
 const CLAUDE_KEY = 'sk-ant-test-0123456789abcdef-SECRET'; // secret-scan:allow (fake test value)
 const SID = `AC${'2'.repeat(32)}`;
-const SENDGRID_KEY = 'SG.test-0123456789abcdef-SECRET'; // secret-scan:allow (fake test value)
 
 let app: ApiApp;
 let http: ReturnType<typeof request>;
@@ -79,11 +83,7 @@ beforeAll(async () => {
     if (url.startsWith(`/2010-04-01/Accounts/${SID}.json`)) return json(200, { sid: SID, status: 'active' });
     if (url.startsWith(`/2010-04-01/Accounts/${SID}/IncomingPhoneNumbers.json`)) return json(200, { incoming_phone_numbers: [{}] });
     if (url === '/v3/scopes')
-      return req.headers.authorization === `Bearer ${SENDGRID_KEY}` ? json(200, { scopes: ['mail.send'] }) : json(401, { errors: [{ message: 'bad key' }] });
-    if (url === '/api/v1/attributes')
-      return req.headers['x-sampledge-client'] === 'zapx' && String(req.headers['x-sampledge-signature'] ?? '').startsWith('v1=')
-        ? json(200, { attributes: [] })
-        : json(401, {});
+      return req.headers.authorization === 'Bearer SG.test-key' ? json(200, { scopes: ['mail.send'] }) : json(401, {});
     if (url.startsWith('/v1/prices/'))
       return url.endsWith('price_gone') ? json(404, { error: { message: 'No such price' } }) : json(200, { active: true });
     json(404, {});
@@ -136,15 +136,31 @@ describe('who can manage integrations', () => {
     await http.get('/api/platform/integrations').expect(401);
   });
 
-  it('lists every integration with where each value comes from', async () => {
+  it('lists every integration; nothing comes from the environment', async () => {
     const list = (await http.get('/api/platform/integrations').set(admin).expect(200)).body.integrations;
-    expect(list.map((i: { key: string }) => i.key)).toEqual(['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3', 'sendgrid', 'sampleon']);
+    expect(list.map((i: { key: string }) => i.key)).toEqual([
+      'anthropic',
+      'ipinfo',
+      'deepgram',
+      'twilio',
+      'sendgrid',
+      'stripe',
+      's3',
+      'sampleon',
+      'cdn',
+    ]);
     const dg = list.find((i: { key: string }) => i.key === 'deepgram');
-    expect(dg).toMatchObject({ enabled: false, source: 'env' });
-    expect(dg.fields.find((f: { name: string }) => f.name === 'model')).toMatchObject({
-      origin: 'env',
-      value: 'env-model',
-      env: 'DEEPGRAM_MODEL',
+    // DEEPGRAM_API_KEY, DEEPGRAM_MODEL and TRANSCRIPTION are set, and ignored.
+    expect(dg).toMatchObject({ enabled: false, switchedOn: false, source: 'none' });
+    const model = dg.fields.find((f: { name: string }) => f.name === 'model');
+    expect(model).toMatchObject({ origin: 'none', value: '' });
+    expect(model).not.toHaveProperty('env');
+    expect(integration('anthropic')).toMatchObject({ enabled: false, values: { apiKey: '', model: '' } });
+    expect(retiredEnvInUse()).toEqual(expect.arrayContaining(['ANTHROPIC_API_KEY', 'DEEPGRAM_API_KEY', 'TRANSCRIPTION']));
+    const sendgrid = list.find((i: { key: string }) => i.key === 'sendgrid');
+    expect(sendgrid.fields.find((f: { name: string }) => f.name === 'fromName')).toMatchObject({
+      origin: 'default',
+      value: 'SampCode surveys',
     });
     const stripe = list.find((i: { key: string }) => i.key === 'stripe');
     expect(stripe.callbacks[0].url).toMatch(/\/api\/billing\/webhook$/);
@@ -167,6 +183,14 @@ describe('saving and secrets', () => {
       .send({ enabled: true, values: { nonsense: 'x' } })
       .expect(400);
     await http.put('/api/platform/integrations/nothing').set(admin).send({ enabled: true, values: {} }).expect(404);
+    // Twilio needs a caller ID (phone dialer) or an SMS sender to be turned on.
+    const neither = await http
+      .put('/api/platform/integrations/twilio')
+      .set(admin)
+      .send({ enabled: true, values: { accountSid: SID, authToken: 'twilio-token-123' } })
+      .expect(400);
+    expect(neither.body.message).toMatch(/caller ID .* or an SMS sender/);
+    await http.delete('/api/platform/integrations/twilio').set(admin).expect(200);
   });
 
   it('seals secrets, never sends them back, and audits without the value', async () => {
@@ -222,7 +246,7 @@ describe('test connection', () => {
     expect(wrong.message).toMatch(/privacy detection/);
 
     const untested = (await http.post('/api/platform/integrations/anthropic/test').set(admin).send({}).expect(200)).body;
-    expect(untested).toMatchObject({ ok: false, message: 'Fill in API key first.' });
+    expect(untested).toMatchObject({ ok: false, message: 'Fill in API key, Model first.' });
     const model = (
       await http
         .post('/api/platform/integrations/anthropic/test')
@@ -264,16 +288,22 @@ describe('providers follow the CRM without a restart', () => {
     expect(gateway.configured).toBe(false);
   });
 
-  it('Deepgram: a saved key with the model from the environment', async () => {
+  it('Deepgram: the saved key and model, not the environment', async () => {
     const t = app.get(TranscriptionService);
     expect(t.current()).toBeNull();
-    await http
+    const noModel = await http
       .put('/api/platform/integrations/deepgram')
       .set(admin)
       .send({ enabled: true, values: { apiKey: 'dg-key-0123456789abcdef' } })
+      .expect(400);
+    expect(noModel.body.message).toMatch(/Model/);
+    await http
+      .put('/api/platform/integrations/deepgram')
+      .set(admin)
+      .send({ enabled: true, values: { apiKey: 'dg-key-0123456789abcdef', model: 'crm-model' } })
       .expect(200);
     expect(t.current()?.name).toBe('deepgram');
-    expect(integration('deepgram').values.model).toBe('env-model');
+    expect(integration('deepgram').values.model).toBe('crm-model');
     expect((await http.post('/api/platform/integrations/deepgram/test').set(admin).send({}).expect(200)).body.ok).toBe(true);
   });
 
@@ -311,74 +341,60 @@ describe('providers follow the CRM without a restart', () => {
       .expect(200);
     expect(store.current()).toBeInstanceOf(S3FileStore);
     const reset = (await http.delete('/api/platform/integrations/s3').set(admin).expect(200)).body;
-    expect(reset).toMatchObject({ source: 'env', enabled: false });
+    expect(reset).toMatchObject({ source: 'none', enabled: false });
     expect(store.current()).toBeInstanceOf(LocalFileStore);
     expect(await prisma.auditEvent.count({ where: { tenantId, action: 'platform.integration_reset', entityId: 's3' } })).toBe(1);
   });
 
-  it('clearing a field falls back to the environment', async () => {
-    await http
-      .put('/api/platform/integrations/deepgram')
-      .set(admin)
-      .send({ enabled: true, values: { model: 'crm-model' } })
-      .expect(200);
-    expect(integration('deepgram').values.model).toBe('crm-model');
-    const cleared = (
-      await http
-        .put('/api/platform/integrations/deepgram')
-        .set(admin)
-        .send({ enabled: true, values: {}, clear: ['model'] })
-        .expect(200)
-    ).body;
-    expect(cleared.fields.find((f: { name: string }) => f.name === 'model')).toMatchObject({ origin: 'env', value: 'env-model' });
-  });
-});
-
-describe('email, SMS and SampAudience are set in the CRM too (no environment variables)', () => {
-  it('SendGrid: saving the key and sender turns email on, sealed and tested', async () => {
-    expect(emailProvider()).toBeNull();
-    const saved = (
-      await http
-        .put('/api/platform/integrations/sendgrid')
-        .set(admin)
-        .send({ enabled: true, values: { apiKey: SENDGRID_KEY, fromEmail: 'surveys@operator.test' } })
-        .expect(200)
-    ).body;
-    expect(saved).toMatchObject({ enabled: true, source: 'crm' });
-    expect(JSON.stringify(saved)).not.toContain(SENDGRID_KEY);
-    const row = await prisma.platformIntegration.findUniqueOrThrow({ where: { key: 'sendgrid' } });
-    expect(JSON.stringify(row)).not.toContain(SENDGRID_KEY);
-    expect(emailProvider()).not.toBeNull();
-    const t = (await http.post('/api/platform/integrations/sendgrid/test').set(admin).send({}).expect(200)).body;
-    expect(t.ok).toBe(true);
-  });
-
-  it('SMS: a sender saved with the Twilio account turns SMS on', async () => {
+  it('clearing a field returns it to its default', async () => {
     await http
       .put('/api/platform/integrations/twilio')
       .set(admin)
-      .send({ enabled: true, values: { accountSid: SID, authToken: 'tw-token-0123456789abcdef', callerId: '+442071234567', smsFrom: '+447700900123' } })
+      .send({ enabled: true, values: { webhookBase: 'https://calls.example.com/api' } })
       .expect(200);
-    expect(smsProvider()).not.toBeNull();
-    await http.put('/api/platform/integrations/twilio').set(admin).send({ enabled: true, values: {}, clear: ['smsFrom'] }).expect(200);
-    expect(smsProvider()).toBeNull();
-  });
-
-  it('SampAudience: the connection comes from the CRM and its test signs a request', async () => {
-    expect(SampleonService.configured()).toBe(false);
-    const saved = (
+    expect(integration('twilio').values.webhookBase).toBe('https://calls.example.com/api');
+    const cleared = (
       await http
-        .put('/api/platform/integrations/sampleon')
+        .put('/api/platform/integrations/twilio')
         .set(admin)
-        .send({ enabled: true, values: { url: 'http://127.0.0.1:5296', clientSecret: 'sa-secret-0123456789abcdef', outcomeSecret: 'sa-outcome-0123456789abcdef' } })
+        .send({ enabled: true, values: {}, clear: ['webhookBase'] })
         .expect(200)
     ).body;
-    expect(saved.callbacks[0].url).toMatch(/\/api\/v1\/sampleon\/events$/);
-    expect(SampleonService.configured()).toBe(true);
-    expect(SampleonService.connection()).toMatchObject({ SAMPLEON_URL: 'http://127.0.0.1:5296', SAMPLEON_CLIENT_ID: 'zapx', SAMPLEON_OUTCOME_SECRET: 'sa-outcome-0123456789abcdef' });
-    const t = (await http.post('/api/platform/integrations/sampleon/test').set(admin).send({}).expect(200)).body;
-    expect(t.ok).toBe(true);
-    await http.delete('/api/platform/integrations/sampleon').set(admin).expect(200);
-    expect(SampleonService.configured()).toBe(false);
+    expect(cleared.fields.find((f: { name: string }) => f.name === 'webhookBase')).toMatchObject({ origin: 'default' });
+    expect(integration('twilio').values.webhookBase).toMatch(/\/api$/);
+    // A required field cannot be cleared while the integration is on.
+    await http
+      .put('/api/platform/integrations/deepgram')
+      .set(admin)
+      .send({ enabled: true, values: {}, clear: ['model'] })
+      .expect(400);
+  });
+
+  it('SendGrid: email sending follows the saved key and sender', async () => {
+    const { emailProvider } = await import('../src/distribution/mailer');
+    expect(emailProvider()).toBeNull();
+    expect((await http.get('/api/auth/password-options').expect(200)).body.forgotPasswordEmail).toBe(false);
+    await http
+      .put('/api/platform/integrations/sendgrid')
+      .set(admin)
+      .send({ enabled: true, values: { apiKey: 'SG.test-key', fromEmail: 'surveys@example.com' } })
+      .expect(200);
+    expect(emailProvider()?.name).toBe('sendgrid');
+    expect((await http.get('/api/auth/password-options').expect(200)).body.forgotPasswordEmail).toBe(true);
+    const tested = (await http.post('/api/platform/integrations/sendgrid/test').set(admin).send({}).expect(200)).body;
+    expect(tested).toMatchObject({ ok: true });
+    expect(tested.message).toMatch(/surveys@example.com/);
+  });
+
+  it('Twilio SMS: on with an SMS sender, without a caller ID the phone dialer stays off', async () => {
+    const { smsProvider } = await import('../src/distribution/sms');
+    const tel = app.get(TelephonyService);
+    await http
+      .put('/api/platform/integrations/twilio')
+      .set(admin)
+      .send({ enabled: true, values: { smsFrom: '+442070000002' }, clear: ['callerId'] })
+      .expect(200);
+    expect(smsProvider()?.name).toBe('twilio');
+    expect(tel.current()).toBeNull();
   });
 });

@@ -365,7 +365,7 @@ export class AutomationService {
       }
       case 'email': {
         const provider = emailProvider();
-        if (!provider) return { type: a.type, ok: false, detail: 'Email sending is off (EMAIL_PROVIDER)' };
+        if (!provider) return { type: a.type, ok: false, detail: 'Email sending is off (Settings > Integrations > SendGrid)' };
         const users = await this.recipients(r, a.to, surveyId);
         let sent = 0;
         const url = `${config().STUDIO_URL.replace(/\/$/, '')}${link}`;

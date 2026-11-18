@@ -24,7 +24,7 @@ export interface SaveInput {
   enabled: boolean;
   /** Field values. For a secret, an empty or missing value keeps the saved one. */
   values: Record<string, string | undefined>;
-  /** Fields to clear (fall back to the environment). */
+  /** Fields to clear (back to their default, or empty). */
   clear?: string[];
 }
 
@@ -133,7 +133,6 @@ export class IntegrationSettingsService implements OnModuleInit, OnModuleDestroy
           kind: f.kind ?? 'text',
           options: f.options ?? null,
           placeholder: f.placeholder ?? null,
-          env: f.env,
           origin: eff.origins[f.name],
           // Secrets never leave the server: only whether one is set, and its last characters.
           value: f.secret ? null : v,
@@ -180,12 +179,14 @@ export class IntegrationSettingsService implements OnModuleInit, OnModuleDestroy
 
     if (input.enabled) {
       const c = config();
-      const missing = def.fields.filter((f) => f.required && !next[f.name] && !f.fromEnv(c) && !f.fallback?.(c));
+      const missing = def.fields.filter((f) => f.required && !next[f.name] && !f.fallback?.(c));
       if (missing.length)
         throw new BadRequestException({
           message: `Fill in ${missing.map((f) => f.label).join(', ')} before turning ${def.name} on`,
           issues: missing.map((f) => ({ path: f.name, message: 'Required' })),
         });
+      const problem = def.validate?.(next);
+      if (problem) throw new BadRequestException({ message: `${def.name} ${problem}`, issues: [] });
     }
 
     const settings: Record<string, string> = {};
@@ -215,7 +216,7 @@ export class IntegrationSettingsService implements OnModuleInit, OnModuleDestroy
     return this.view(key);
   }
 
-  /** Forget everything saved in the CRM for this integration: it runs from the environment again. */
+  /** Forget everything saved for this integration: it is off and not set up. */
   async reset(user: AuthUser, key: string) {
     await this.operatorAdmin(user);
     if (!isIntegrationKey(key)) throw new NotFoundException('No such integration');

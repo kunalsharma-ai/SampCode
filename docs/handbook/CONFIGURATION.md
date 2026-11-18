@@ -17,33 +17,45 @@ secret appears here; replace every `<…>` placeholder with your own value.
 If a value is invalid the API refuses to start with `Invalid configuration: NAME: message; …`.
 Start from `.env.example` (`cp .env.example .env`).
 
-## Integrations set in the CRM _(PR #38)_
+## API keys are set in the CRM, never in the environment _(ADR 0043)_
 
-From PR #38 the provider settings below no longer have to be environment variables. An administrator
-of the organization that runs the installation (or the super admin) enters them in the studio under
-**Settings → Integrations** (`/settings/integrations`), presses **Test**, and saves
-([ADR 0035](../adr/0035-integrations-in-the-crm.md)). They are stored in the `PlatformIntegration`
-table, secrets sealed with `SECRETS_KEY`.
+Every third-party API key is entered in the studio under **Settings → Integrations**
+(`/settings/integrations`) by an administrator of the organization that runs the installation, or by
+the super admin, tested and saved. It is stored in the `PlatformIntegration` collection, secrets sealed
+with `SECRETS_KEY` ([ADR 0035](../adr/0035-integrations-in-the-crm.md),
+[ADR 0043](../adr/0043-api-keys-in-the-database.md)). The server reads no API key from its environment:
+the variables that used to hold them (listed in `RETIRED_ENV`, `apps/api/src/platform/installation-secrets.ts`)
+are ignored, and the API logs a warning naming any that are still set.
 
-The on/off switch in the CRM replaces the environment switch once the integration has been saved
-there (`switchedOn = row ? row.enabled : envEnabled(config)` in `apps/api/src/platform/integrations.ts`).
+| Integration (key)         | Fields                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| Claude AI (`anthropic`)   | API key, default model, models per task (architect, translate, insights), price table        |
+| IPinfo (`ipinfo`)         | access token                                                                                 |
+| Deepgram (`deepgram`)     | API key, model                                                                               |
+| Twilio (`twilio`)         | account SID, auth token, caller ID (phone dialer), SMS sender, callback address              |
+| SendGrid (`sendgrid`)     | API key, from address, from name                                                             |
+| Stripe (`stripe`)         | secret key, webhook signing secret, plan prices, API version, plan after a subscription ends |
+| Amazon S3 (`s3`)          | bucket, region, folder, KMS key, access key ID and secret (outside AWS)                      |
+| SampAudience (`sampleon`) | address, client ID, client secret, outcome secret                                            |
+| CDN (`cdn`)               | shared secret sent as `X-Zapx-Edge`, viewer address header                                   |
 
-| Integration (key)       | Environment switch it replaces       | Fields, with the variable each falls back to                                                                                                                               |
-| ----------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude AI (`anthropic`) | `ANTHROPIC_API_KEY` + `AI_MODEL` set | `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_MODEL_ARCHITECT`, `AI_MODEL_TRANSLATE`, `AI_MODEL_INSIGHTS`, `AI_PRICING`                                                             |
-| IPinfo (`ipinfo`)       | `NETWORK_REPUTATION=ipinfo`          | `IPINFO_TOKEN`                                                                                                                                                             |
-| Deepgram (`deepgram`)   | `TRANSCRIPTION=deepgram`             | `DEEPGRAM_API_KEY`, `DEEPGRAM_MODEL`                                                                                                                                       |
-| Twilio (`twilio`)       | `TELEPHONY=twilio`                   | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_CALLER_ID`, `TELEPHONY_WEBHOOK_BASE` (SMS uses the same account; `SMS_PROVIDER` and `SMS_FROM` stay in the environment) |
-| Stripe (`stripe`)       | `BILLING=stripe`                     | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICES`, `STRIPE_API_VERSION`, `BILLING_FALLBACK_PLAN`                                                               |
-| File storage (`s3`)     | `FILE_STORE=s3`                      | `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `S3_KMS_KEY_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`                                                                       |
+Rules: an integration is on only when it is switched on in the CRM and its required fields are filled
+in. A field left empty uses its default where it has one (for example the Twilio callback address),
+otherwise it is empty. **Forget saved settings** (`DELETE`) removes the saved row and turns it off.
+Each API and worker process re-reads the saved values every `INTEGRATIONS_REFRESH_MS` (default 15 000
+ms). The field list comes from `INTEGRATIONS` in `apps/api/src/platform/integrations.ts`. For scripts,
+`node apps/api/dist/cli/set-integration.js <key> -` saves one from JSON on standard input.
 
-Rules: a value saved in the CRM **wins**; a field left empty there falls back to the environment
-variable; **Reset** (`DELETE`) removes the saved row so the environment applies again. Each API and
-worker process re-reads the saved values every `INTEGRATIONS_REFRESH_MS` (default 15 000 ms). The
-field list comes from `INTEGRATIONS` in `apps/api/src/platform/integrations.ts`.
-SendGrid (`EMAIL_PROVIDER`, `SENDGRID_API_KEY`), SSO, `JWT_SECRET`, `SECRETS_KEY` and the database stay
-in the environment. The start-up checks in the next section still apply to whatever is set in the
-environment.
+## Secrets SampCode makes for itself _(ADR 0043)_
+
+| Secret                             | Where it lives                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- | ------------------------ |
+| `SECRETS_KEY` / `SECRETS_KEY_FILE` | master key: seals every secret in the database (API keys, vendor and SSO secrets, webhook secrets, phone numbers, the two below) | yes (Compose makes it), 32+ chars                               | falls back to `JWT_SECRET` in development | `<openssl rand -hex 32>` |
+| `JWT_SECRET`                       | signs sessions                                                                                                                   | no: made on the first start and kept in the database (ADR 0043) | —                                         | only to override         |
+| `SIGNING_KEYS_SECRET`              | derives the keys for test links, network/device hashes and SSO state (S5)                                                        | no: made on the first start and kept in the database (ADR 0043) | —                                         | only to override         |
+
+`loadInstallationSecrets()` runs in `main.ts` and `worker.ts` before the configuration is read. Keep a
+copy of `SECRETS_KEY`: without it the saved API keys and these secrets cannot be opened.
 
 ## Production safety checks
 
@@ -52,63 +64,54 @@ With `NODE_ENV=production` the API also refuses to start when (`config.ts`, `sup
 `change-me`, `changeme`, `test-secret`); `SECRETS_KEY` is missing, equals `JWT_SECRET` or is an
 example; `CALLBACK_ALLOW_PRIVATE_HOSTS=true`; or `SSO_ALLOW_INSECURE_ISSUER=true`.
 
-Provider switches are checked too: turning a provider on without its credentials stops start-up
-(for example `TELEPHONY=twilio` without `TWILIO_AUTH_TOKEN`).
-
 ## API and worker variables (`apps/api/src/config.ts`)
 
 "Required" means the API will not start without it. Defaults are the code's defaults.
 
 ### Core
 
-| Variable                                                                                                                                                  | Purpose                                                                                                                                  | Required                        | Default                    | Example placeholder                                                    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------------------------- | ---------------------------------------------------------------------- |
-| `DATABASE_URL`                                                                                                                                            | MongoDB connection for Prisma (a replica set; transactions need one). Add `&maxPoolSize=10`                                              | yes (or the `DB_*` parts below) | —                          | `mongodb://${DB_USER}:${DB_PASSWORD}@<host>:27017/zapx?replicaSet=rs0` |
-| `DB_HOST`, `DB_SCHEME`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_TLS`, `DB_SSLMODE`, `DB_REPLICA_SET`, `DB_AUTH_SOURCE`, `DB_CONNECTION_LIMIT` | build `DATABASE_URL` when it is unset (`apps/api/src/database-url.ts`; on AWS Terraform sets `DB_SCHEME=mongodb+srv` and the Atlas host) | only without `DATABASE_URL`     | port 27017, name `zapx`    | `DB_HOST=<cluster-endpoint>`                                           |
-| `LOG_LEVEL`                                                                                                                                               | `debug` adds debug lines, `silent` turns API logging off (`apps/api/src/http/logger.ts`)                                                 | no                              | `log`                      | `debug`                                                                |
-| `JWT_SECRET`                                                                                                                                              | signs sessions; development fallback for `SIGNING_KEYS_SECRET` and `SecretBox`                                                           | yes, 32+ characters             | —                          | `<openssl rand -hex 32>`                                               |
-| `SECRETS_KEY`                                                                                                                                             | encrypts stored secrets (vendor partner secret, SSO client secret, webhook secrets, phone numbers)                                       | yes in production, 32+ chars    | falls back to `JWT_SECRET` | `<openssl rand -base64 32>`                                            |
-| `SIGNING_KEYS_SECRET`                                                                                                                                     | derives the keys for test links, network/device hashes and SSO state (S5)                                                                | yes in production, 32+ chars    | falls back to `JWT_SECRET` | `<openssl rand -hex 32>`                                               |
-| `THROTTLE_STORE`                                                                                                                                          | rate-limit counters: `database` (shared by all API processes) or `memory` (S4)                                                           | no                              | `database` in production   | `database`                                                             |
-| `NODE_ENV`                                                                                                                                                | `production` turns on the safety checks                                                                                                  | no                              | `development`              | `production`                                                           |
-| `API_PORT`                                                                                                                                                | HTTP port                                                                                                                                | no                              | `4000`                     | `4000`                                                                 |
-| `RUNTIME_BASE_URL`                                                                                                                                        | public address of the respondent runtime, used to build survey links                                                                     | no                              | `http://localhost:5173`    | `https://take.<your-domain>`                                           |
-| `CAPI_APP_URL`                                                                                                                                            | address of the CAPI app, shown in the studio                                                                                             | no                              | `http://localhost:5174`    | `https://field.<your-domain>`                                          |
-| `STUDIO_URL`                                                                                                                                              | public studio address; SSO callback is `${STUDIO_URL}/api/auth/sso/callback`                                                             | no                              | `http://localhost:3000`    | `https://zapx.<your-domain>`                                           |
-| `COOKIE_SECURE`                                                                                                                                           | send the session cookie only over https                                                                                                  | `true` in production            | `false`                    | `true`                                                                 |
-| `ALLOW_SIGNUP`                                                                                                                                            | allow self-service sign-up (creates a new organization)                                                                                  | no                              | off unless `true`          | `false`                                                                |
-| `DEFAULT_PLAN`                                                                                                                                            | plan for organizations created by sign-up                                                                                                | no                              | `enterprise`               | `free`                                                                 |
-| `INTEGRATIONS_REFRESH_MS` _(PR #38)_                                                                                                                      | how often each process re-reads Settings → Integrations (1 000–600 000 ms)                                                               | no, default `15000`             |
-| `MOBILE_MIN_VERSION` _(PR #40)_                                                                                                                           | oldest mobile app version allowed to sign in, e.g. `1.2.0`; older apps are asked to update                                               | no, unset = any                 |
-| `DATA_REGION` _(PR #34)_                                                                                                                                  | region this deployment declares it keeps data in; compared with each organization's region                                               | no                              | empty                      | `eu`                                                                   |
+| Variable                                                                                                                                                  | Purpose                                                                                                                                  | Required                                                        | Default                                   | Example placeholder                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
+| `DATABASE_URL`                                                                                                                                            | MongoDB connection for Prisma (a replica set; transactions need one). Add `&maxPoolSize=10`                                              | yes (or the `DB_*` parts below)                                 | —                                         | `mongodb://${DB_USER}:${DB_PASSWORD}@<host>:27017/zapx?replicaSet=rs0` |
+| `DB_HOST`, `DB_SCHEME`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_TLS`, `DB_SSLMODE`, `DB_REPLICA_SET`, `DB_AUTH_SOURCE`, `DB_CONNECTION_LIMIT` | build `DATABASE_URL` when it is unset (`apps/api/src/database-url.ts`; on AWS Terraform sets `DB_SCHEME=mongodb+srv` and the Atlas host) | only without `DATABASE_URL`                                     | port 27017, name `zapx`                   | `DB_HOST=<cluster-endpoint>`                                           |
+| `LOG_LEVEL`                                                                                                                                               | `debug` adds debug lines, `silent` turns API logging off (`apps/api/src/http/logger.ts`)                                                 | no                                                              | `log`                                     | `debug`                                                                |
+| `JWT_SECRET`                                                                                                                                              | signs sessions                                                                                                                           | no: made on the first start and kept in the database (ADR 0043) | —                                         | only to override                                                       |
+| `SECRETS_KEY` / `SECRETS_KEY_FILE`                                                                                                                        | master key: seals every secret in the database (API keys, vendor and SSO secrets, webhook secrets, phone numbers, the two below)         | yes (Compose makes it), 32+ chars                               | falls back to `JWT_SECRET` in development | `<openssl rand -hex 32>`                                               |
+| `SIGNING_KEYS_SECRET`                                                                                                                                     | derives the keys for test links, network/device hashes and SSO state (S5)                                                                | no: made on the first start and kept in the database (ADR 0043) | —                                         | only to override                                                       |
+| `THROTTLE_STORE`                                                                                                                                          | rate-limit counters: `database` (shared by all API processes) or `memory` (S4)                                                           | no                                                              | `database` in production                  | `database`                                                             |
+| `NODE_ENV`                                                                                                                                                | `production` turns on the safety checks                                                                                                  | no                                                              | `development`                             | `production`                                                           |
+| `API_PORT`                                                                                                                                                | HTTP port                                                                                                                                | no                                                              | `4000`                                    | `4000`                                                                 |
+| `RUNTIME_BASE_URL`                                                                                                                                        | public address of the respondent runtime, used to build survey links                                                                     | no                                                              | `http://localhost:5173`                   | `https://take.<your-domain>`                                           |
+| `CAPI_APP_URL`                                                                                                                                            | address of the CAPI app, shown in the studio                                                                                             | no                                                              | `http://localhost:5174`                   | `https://field.<your-domain>`                                          |
+| `STUDIO_URL`                                                                                                                                              | public studio address; SSO callback is `${STUDIO_URL}/api/auth/sso/callback`                                                             | no                                                              | `http://localhost:3000`                   | `https://zapx.<your-domain>`                                           |
+| `COOKIE_SECURE`                                                                                                                                           | send the session cookie only over https                                                                                                  | `true` in production                                            | `false`                                   | `true`                                                                 |
+| `ALLOW_SIGNUP`                                                                                                                                            | allow self-service sign-up (creates a new organization)                                                                                  | no                                                              | off unless `true`                         | `false`                                                                |
+| `DEFAULT_PLAN`                                                                                                                                            | plan for organizations created by sign-up                                                                                                | no                                                              | `enterprise`                              | `free`                                                                 |
+| `INTEGRATIONS_REFRESH_MS` _(PR #38)_                                                                                                                      | how often each process re-reads Settings → Integrations (1 000–600 000 ms)                                                               | no, default `15000`                                             |
+| `MOBILE_MIN_VERSION` _(PR #40)_                                                                                                                           | oldest mobile app version allowed to sign in, e.g. `1.2.0`; older apps are asked to update                                               | no, unset = any                                                 |
+| `DATA_REGION` _(PR #34)_                                                                                                                                  | region this deployment declares it keeps data in; compared with each organization's region                                               | no                                                              | empty                                     | `eu`                                                                   |
 
 ### Sign-in protection and proxies
 
-| Variable                     | Purpose                                                                                     | Default | Example                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------- | ------- | --------------------------- |
-| `LOGIN_RATE_PER_MINUTE`      | sign-in attempts per minute per address                                                     | `10`    | `10`                        |
-| `SIGNUP_RATE_PER_MINUTE`     | sign-ups per minute per address                                                             | `5`     | `5`                         |
-| `LOGIN_MAX_FAILURES`         | wrong passwords in a row before the account locks                                           | `10`    | `10`                        |
-| `LOGIN_LOCK_MINUTES`         | lock length                                                                                 | `15`    | `15`                        |
-| `PASSWORD_RESET_HOURS`       | hours a password reset link works (1–168) _(PR #36)_                                        | `24`    | `24`                        |
-| `SSO_ALLOW_INSECURE_ISSUER`  | allow http/private identity providers (development and tests only; refused in production)   | off     | `false`                     |
-| `TRUST_PROXY_HOPS`           | proxies in front of the API that add `X-Forwarded-For`                                      | `1`     | `1`                         |
-| `EDGE_SHARED_SECRET`         | secret the CDN sends as `X-Zapx-Edge`; only then viewer address/country headers are trusted | unset   | `<openssl rand -hex 32>`    |
-| `EDGE_CLIENT_ADDRESS_HEADER` | header with the viewer address                                                              | empty   | `cloudfront-viewer-address` |
-| `GEO_COUNTRY_HEADER`         | header with the respondent's country (fraud check)                                          | empty   | `cloudfront-viewer-country` |
+| Variable                    | Purpose                                                                                   | Default | Example                     |
+| --------------------------- | ----------------------------------------------------------------------------------------- | ------- | --------------------------- |
+| `LOGIN_RATE_PER_MINUTE`     | sign-in attempts per minute per address                                                   | `10`    | `10`                        |
+| `SIGNUP_RATE_PER_MINUTE`    | sign-ups per minute per address                                                           | `5`     | `5`                         |
+| `LOGIN_MAX_FAILURES`        | wrong passwords in a row before the account locks                                         | `10`    | `10`                        |
+| `LOGIN_LOCK_MINUTES`        | lock length                                                                               | `15`    | `15`                        |
+| `PASSWORD_RESET_HOURS`      | hours a password reset link works (1–168) _(PR #36)_                                      | `24`    | `24`                        |
+| `SSO_ALLOW_INSECURE_ISSUER` | allow http/private identity providers (development and tests only; refused in production) | off     | `false`                     |
+| `TRUST_PROXY_HOPS`          | proxies in front of the API that add `X-Forwarded-For`                                    | `1`     | `1`                         |
+| `GEO_COUNTRY_HEADER`        | header with the respondent's country (fraud check)                                        | empty   | `cloudfront-viewer-country` |
 
 ### AI
 
-| Variable                                                                   | Purpose                                                                 | Default       | Example                               |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------- | ------------------------------------- |
-| `AI_PROVIDER`                                                              | provider; only `anthropic` exists                                       | `anthropic`   | `anthropic`                           |
-| `ANTHROPIC_API_KEY`                                                        | turns AI on (without it AI endpoints answer 503, everything else works) | unset         | `<anthropic-api-key>`                 |
-| `AI_MODEL`                                                                 | default model for every AI task (no model is built into the code)       | unset         | `<model id, e.g. claude-opus-5-5>`    |
-| `AI_MODEL_ARCHITECT`, `AI_MODEL_TRANSLATE`, `AI_MODEL_INSIGHTS` _(PR #33)_ | model per task, overriding `AI_MODEL`                                   | unset         | `<model id>`                          |
-| `AI_PRICING`                                                               | JSON price list (USD per million tokens) for cost tracking              | `{}`          | `{"<model>":{"input":4,"output":20}}` |
-| `AI_MAX_RETRIES`, `AI_TIMEOUT_MS`                                          | provider retries and timeout                                            | `2`, `600000` |                                       |
-| `AI_BREAKER_FAILURES`, `AI_BREAKER_OPEN_MS`                                | circuit breaker                                                         | `5`, `60000`  |                                       |
-| `AI_DEFAULT_RPM`, `AI_DEFAULT_RPD`                                         | per-organization rate limits when it has no own AI policy               | `10`, `500`   |                                       |
+| Variable                                    | Purpose                                                   | Default       | Example     |
+| ------------------------------------------- | --------------------------------------------------------- | ------------- | ----------- |
+| `AI_PROVIDER`                               | provider; only `anthropic` exists                         | `anthropic`   | `anthropic` |
+| `AI_MAX_RETRIES`, `AI_TIMEOUT_MS`           | provider retries and timeout                              | `2`, `600000` |             |
+| `AI_BREAKER_FAILURES`, `AI_BREAKER_OPEN_MS` | circuit breaker                                           | `5`, `60000`  |             |
+| `AI_DEFAULT_RPM`, `AI_DEFAULT_RPD`          | per-organization rate limits when it has no own AI policy | `10`, `500`   |             |
 
 ### Interviews, uploads and quality
 
@@ -119,54 +122,39 @@ Provider switches are checked too: turning a provider on without its credentials
 | `MEDIA_MAX_MB`                                     | survey media upload limit (images 10, audio 25 are fixed caps) | `100`                             |
 | `CAPTURE_MAX_MB`                                   | CAPI recording limit (photos fixed at 15)                      | `100`                             |
 | `CAPTURE_RETENTION_DAYS`                           | delete photos/recordings after this many days (`0` = keep)     | `0`                               |
-| `NETWORK_REPUTATION`                               | `off` or `ipinfo`                                              | `off`                             |
-| `IPINFO_TOKEN`                                     | IPinfo token (required with `ipinfo`)                          | empty                             |
 | `IPINFO_API_BASE`, `NETWORK_REPUTATION_TIMEOUT_MS` | endpoint and timeout                                           | `https://ipinfo.io`, `2000`       |
-| `TRANSCRIPTION`                                    | `off` or `deepgram`                                            | `off`                             |
-| `DEEPGRAM_API_KEY`, `DEEPGRAM_MODEL`               | required with `deepgram`                                       | empty                             |
 | `DEEPGRAM_API_BASE`, `TRANSCRIPTION_TIMEOUT_S`     | endpoint and timeout                                           | `https://api.deepgram.com`, `600` |
 
 ### Phone, email and SMS
 
-| Variable                                                                                                                       | Purpose                                                               | Default                                        |
-| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ---------------------------------------------- |
-| `TELEPHONY`                                                                                                                    | `off` or `twilio` (CATI dialer)                                       | `off`                                          |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_CALLER_ID` (E.164), `TELEPHONY_WEBHOOK_BASE` (public API URL ending `/api`) | required with `twilio`                                                | empty                                          |
-| `TWILIO_API_BASE`, `TELEPHONY_RING_SECONDS`                                                                                    | endpoint and ring time                                                | `https://api.twilio.com`, `30`                 |
-| `EMAIL_PROVIDER` _(PR #32)_                                                                                                    | `off` or `sendgrid`                                                   | `off`                                          |
-| `SENDGRID_API_KEY`, `EMAIL_FROM` _(PR #32)_                                                                                    | required with `sendgrid` (`EMAIL_FROM` must be a verified sender)     | empty                                          |
-| `SENDGRID_API_BASE`, `EMAIL_FROM_NAME` _(PR #32)_                                                                              | endpoint and sender name                                              | `https://api.sendgrid.com`, `SampCode surveys` |
-| `SMS_PROVIDER` _(PR #34)_                                                                                                      | `off` or `twilio` (uses the Twilio SID and token above)               | `off`                                          |
-| `SMS_FROM` _(PR #34)_                                                                                                          | E.164 number or Messaging Service SID (`MG…`), required with `twilio` | empty                                          |
+| Variable                                    | Purpose                  | Default                                        |
+| ------------------------------------------- | ------------------------ | ---------------------------------------------- |
+| `TWILIO_API_BASE`, `TELEPHONY_RING_SECONDS` | endpoint and ring time   | `https://api.twilio.com`, `30`                 |
+| `SENDGRID_API_BASE` _(PR #32)_              | endpoint and sender name | `https://api.sendgrid.com`, `SampCode surveys` |
 
 ### Background work, files and callbacks
 
-| Variable                                                 | Purpose                                                                                   | Default             |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------- |
-| `JOB_WORKER`                                             | run the job loop in this process (`off` when the worker process runs)                     | `on`                |
-| `JOB_POLL_MS`                                            | job loop interval                                                                         | `2000`              |
-| `CALLBACK_WORKER`                                        | run callbacks/webhooks loop in this process                                               | `on`                |
-| `CALLBACK_POLL_MS`, `CALLBACK_TIMEOUT_MS`                | interval and per-request timeout                                                          | `5000`, `10000`     |
-| `CALLBACK_ALLOW_PRIVATE_HOSTS`                           | let callbacks/webhooks reach localhost/private networks (dev only; refused in production) | off                 |
-| `FILE_STORE`                                             | `local` or `s3`                                                                           | `local`             |
-| `FILES_DIR`                                              | local file folder (shared by API and worker)                                              | `.data/files`       |
-| `S3_BUCKET`                                              | bucket (required with `s3`)                                                               | unset               |
-| `S3_REGION`, `S3_PREFIX`, `S3_KMS_KEY_ID`, `S3_ENDPOINT` | region, key prefix, SSE-KMS key, test endpoint                                            | `eu-west-1`, unset… |
-| `EXPORT_SYNC_MAX_ROWS`                                   | larger exports must run as background jobs                                                | `10000`             |
-| `EXPORT_FILE_TTL_HOURS`                                  | export files are deleted after                                                            | `72`                |
-| `JOB_RETENTION_DAYS`, `WEBHOOK_DELIVERY_RETENTION_DAYS`  | housekeeping retention                                                                    | `30`, `30`          |
+| Variable                                                | Purpose                                                                                   | Default             |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------- |
+| `JOB_WORKER`                                            | run the job loop in this process (`off` when the worker process runs)                     | `on`                |
+| `JOB_POLL_MS`                                           | job loop interval                                                                         | `2000`              |
+| `CALLBACK_WORKER`                                       | run callbacks/webhooks loop in this process                                               | `on`                |
+| `CALLBACK_POLL_MS`, `CALLBACK_TIMEOUT_MS`               | interval and per-request timeout                                                          | `5000`, `10000`     |
+| `CALLBACK_ALLOW_PRIVATE_HOSTS`                          | let callbacks/webhooks reach localhost/private networks (dev only; refused in production) | off                 |
+| `FILES_DIR`                                             | local file folder (shared by API and worker)                                              | `.data/files`       |
+| `S3_ENDPOINT`                                           | region, key prefix, SSE-KMS key, test endpoint                                            | `eu-west-1`, unset… |
+| `EXPORT_SYNC_MAX_ROWS`                                  | larger exports must run as background jobs                                                | `10000`             |
+| `EXPORT_FILE_TTL_HOURS`                                 | export files are deleted after                                                            | `72`                |
+| `JOB_RETENTION_DAYS`, `WEBHOOK_DELIVERY_RETENTION_DAYS` | housekeeping retention                                                                    | `30`, `30`          |
 
 S3 credentials are not SampCode settings: the AWS SDK uses its normal chain (the ECS task role on AWS,
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` elsewhere).
 
 ### Billing
 
-| Variable                                                         | Purpose                                                 | Default                                 |
-| ---------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------- |
-| `BILLING`                                                        | `off` or `stripe`                                       | `off`                                   |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                     | required with `stripe`                                  | unset                                   |
-| `STRIPE_PRICES`                                                  | JSON plan → price, required with `stripe`               | `{}` (`{"team":"price_<id>"}`)          |
-| `STRIPE_API_VERSION`, `STRIPE_API_BASE`, `BILLING_FALLBACK_PLAN` | API version pin, test endpoint, plan after cancellation | unset, `https://api.stripe.com`, `free` |
+| Variable          | Purpose                                                 | Default                                 |
+| ----------------- | ------------------------------------------------------- | --------------------------------------- |
+| `STRIPE_API_BASE` | API version pin, test endpoint, plan after cancellation | unset, `https://api.stripe.com`, `free` |
 
 ## Other variables
 
@@ -182,7 +170,7 @@ S3 credentials are not SampCode settings: the AWS SDK uses its normal chain (the
 
 ## Gaps found
 
-- `.env.example` does not list `AI_MODEL_INSIGHTS`, `DATA_REGION`, `SMS_PROVIDER`, `SMS_FROM`,
+- `.env.example` does not list `DATA_REGION`,
   `SENDGRID_API_BASE`, `IPINFO_API_BASE`, `DEEPGRAM_API_BASE`, `TWILIO_API_BASE`,
   `TELEPHONY_RING_SECONDS`, `TRANSCRIPTION_TIMEOUT_S`, `NETWORK_REPUTATION_TIMEOUT_MS`,
   `AI_TIMEOUT_MS`, `STRIPE_API_BASE`. They all have safe defaults, so nothing breaks, but they are

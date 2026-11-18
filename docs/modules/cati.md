@@ -76,9 +76,10 @@ interviewer in any survey, also for cases added before it was listed.
 
 With the dialer, interviewers do not dial and never see respondents' numbers.
 
-1. The installation has a telephony provider: `TELEPHONY=twilio` with `TWILIO_ACCOUNT_SID`,
-   `TWILIO_AUTH_TOKEN`, `TWILIO_CALLER_ID` (a Twilio number, E.164) and `TELEPHONY_WEBHOOK_BASE` (the
-   public address of the API ending in `/api`, for example `https://zapx.example.com/api`).
+1. The installation has a telephony provider: Settings → Integrations → Twilio with the account SID,
+   the auth token, a caller ID (a Twilio number, E.164) and, if the default does not fit, the public
+   address Twilio calls back (the API ending in `/api`, for example `https://zapx.example.com/api`;
+   the default is the studio address followed by `/api`).
 2. A programmer turns on **Use the dialer** for the survey (Interviewers tab, Phone dialer), and
    optionally **Record calls** with the sentence read to the respondent before connecting.
 3. Each interviewer adds the phone the dialer should ring for them (Calls, left panel), in
@@ -98,7 +99,7 @@ at Twilio without being copied. If a copy fails it is retried hourly, five times
 recording stays at Twilio and the reason is kept on the call.
 
 Webhooks (`/api/telephony/twilio/*`) are accepted only with a valid `X-Twilio-Signature` for the
-address under `TELEPHONY_WEBHOOK_BASE`, so that setting must match exactly what Twilio calls.
+under the callback address in the Twilio integration, so that setting must match exactly what Twilio calls.
 
 The adapter has been **tested against a local stand-in of the Twilio API only**, not against Twilio.
 

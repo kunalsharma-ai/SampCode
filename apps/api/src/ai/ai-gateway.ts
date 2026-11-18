@@ -26,7 +26,7 @@ export interface EffectivePolicy {
   isDefault: boolean;
 }
 
-/** micro-USD for one call, from the AI_PRICING table (USD per million tokens). */
+/** micro-USD for one call, from the price table in Settings > Integrations (USD per million tokens). */
 export function costMicroUsd(price: ModelPrice | undefined, u: AiTokenUsage | undefined): bigint {
   if (!price || !u) return 0n;
   const usd =
@@ -38,13 +38,13 @@ export function costMicroUsd(price: ModelPrice | undefined, u: AiTokenUsage | un
   return BigInt(Math.round(usd * 1_000_000));
 }
 
-/** Price list from Settings > Integrations, else AI_PRICING. */
+/** Price list from Settings > Integrations (none set: costs are not estimated). */
 function aiPricing(): Record<string, ModelPrice> {
   const raw = integration('anthropic').values.pricing;
   try {
-    return raw ? (JSON.parse(raw) as Record<string, ModelPrice>) : config().AI_PRICING;
+    return raw ? (JSON.parse(raw) as Record<string, ModelPrice>) : {};
   } catch {
-    return config().AI_PRICING;
+    return {};
   }
 }
 
