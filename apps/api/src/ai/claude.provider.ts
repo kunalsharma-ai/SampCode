@@ -1,3 +1,4 @@
+import { integration } from '../platform/integrations';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaContentBlockParam, BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import {
@@ -293,7 +294,7 @@ function mapError(err: unknown): AiError {
 export class UnconfiguredAiProvider extends AiProvider {
   readonly configured = false;
   readonly model = '';
-  constructor(private readonly reason = 'An administrator needs to set up Claude in Settings > Integrations.') {
+  constructor(private readonly reason = aiSetupReason()) {
     super();
   }
   architect(): Promise<ArchitectResult> {
@@ -307,6 +308,20 @@ export class UnconfiguredAiProvider extends AiProvider {
   }
 }
 
-export function notConfigured(reason = 'An administrator needs to set up Claude in Settings > Integrations.'): AiError {
+export function notConfigured(reason = aiSetupReason()): AiError {
   return new AiError(`AI is not configured on this server. ${reason}`, 503, 'NOT_CONFIGURED');
+}
+
+/**
+ * What exactly is missing for AI, and who fixes it where (client feedback 2026-11: the generic
+ * message did not say). Keys are kept in the database (Super admin > Integrations, or Settings >
+ * Integrations for administrators of the organization that runs the installation).
+ */
+export function aiSetupReason(): string {
+  const s = integration('anthropic');
+  const where = 'Super admin > Integrations > Claude (Anthropic)';
+  if (!s.values.apiKey) return `The Claude API key has not been added yet: a super admin adds it in ${where}.`;
+  if (!s.values.model) return `No Claude model is chosen: a super admin sets it in ${where}.`;
+  if (!s.switchedOn) return `Claude is switched off: a super admin turns it on in ${where}.`;
+  return `A super admin needs to check Claude in ${where} (use "Test connection").`;
 }

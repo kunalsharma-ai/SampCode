@@ -135,7 +135,10 @@ export class SampleonService {
         throw new ConflictException(`Vendor code ${SAMPLEON_VENDOR_CODE} is already used by another vendor in this project`);
       return existing;
     }
-    if (!c.SAMPLEON_OUTCOME_SECRET) throw new ServiceUnavailableException('The SampAudience outcome secret is not set: enter it under Settings > Integrations > SampAudience');
+    if (!c.SAMPLEON_OUTCOME_SECRET)
+      throw new ServiceUnavailableException(
+        'The SampAudience outcome secret is not set: enter it under Settings > Integrations > SampAudience',
+      );
     const vendor = await this.prisma.vendor.create({
       data: {
         tenantId: user.tenantId,
@@ -180,7 +183,11 @@ export class SampleonService {
       loiMinutes: input.loiMinutes,
       reward: input.reward,
       fieldwork: input.fieldwork,
-      survey: { launchUrl: SampleonService.launchUrl(survey.id), language: input.language, hostId: SampleonService.connection().SAMPLEON_CLIENT_ID },
+      survey: {
+        launchUrl: SampleonService.launchUrl(survey.id),
+        language: input.language,
+        hostId: SampleonService.connection().SAMPLEON_CLIENT_ID,
+      },
       redirects: { allowRouting: input.allowRouting },
       ...(input.exclusions ? { exclusions: input.exclusions } : {}),
     };

@@ -127,7 +127,8 @@ const CHECKS: Record<IntegrationKey, Checker> = {
     const r = await call(`${base(config().SENDGRID_API_BASE)}/v3/scopes`, { headers: { Authorization: `Bearer ${v.apiKey}` } });
     if (r.status !== 200) return { ok: false, message: `${refused('SendGrid', r.status)} ${errorText(r.body)}`.trim() };
     const scopes = (r.body.scopes as string[] | undefined) ?? [];
-    if (!scopes.includes('mail.send')) return { ok: false, message: 'The key works but has no Mail Send permission. Create one with Mail Send in SendGrid.' };
+    if (!scopes.includes('mail.send'))
+      return { ok: false, message: 'The key works but has no Mail Send permission. Create one with Mail Send in SendGrid.' };
     return { ok: true, message: `Connected. The key may send mail from ${v.fromEmail}.` };
   },
 

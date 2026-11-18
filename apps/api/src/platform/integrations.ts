@@ -18,6 +18,9 @@
 import { z } from 'zod';
 import { config, type AppConfig } from '../config';
 
+/** Model used when none is chosen in the CRM or AI_MODEL. */
+export const DEFAULT_AI_MODEL = 'claude-opus-5-5';
+
 export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3', 'sendgrid', 'sampleon'] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 export const isIntegrationKey = (k: string): k is IntegrationKey => (INTEGRATION_KEYS as readonly string[]).includes(k);
@@ -132,7 +135,9 @@ const SAMPLEON: IntegrationDef = {
   privacy: 'Survey ids, targets and launch links are sent to SampAudience; respondents arrive with a SampAudience token only.',
   signupUrl: '',
   envEnabled: (c) => !!c.SAMPLEON_URL,
-  callbacks: (c) => [{ label: 'Events address to give SampAudience (Connected systems)', url: `${c.STUDIO_URL.replace(/\/$/, '')}/api/v1/sampleon/events` }],
+  callbacks: (c) => [
+    { label: 'Events address to give SampAudience (Connected systems)', url: `${c.STUDIO_URL.replace(/\/$/, '')}/api/v1/sampleon/events` },
+  ],
   fields: [
     {
       name: 'url',
@@ -184,7 +189,7 @@ export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
     purpose: 'AI Survey Architect, AI translation and the AI assistants. Organizations still choose their own AI limits.',
     privacy: 'Briefs, uploaded questionnaires and texts to translate are sent to Anthropic when someone uses an AI feature.',
     signupUrl: 'https://console.anthropic.com/settings/keys',
-    envEnabled: (c) => !!c.ANTHROPIC_API_KEY && !!c.AI_MODEL,
+    envEnabled: (c) => !!c.ANTHROPIC_API_KEY,
     fields: [
       {
         name: 'apiKey',
@@ -200,9 +205,11 @@ export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
         name: 'model',
         label: 'Model',
         required: true,
-        help: 'Default model for every AI task, e.g. claude-opus-5-5.',
+        help: 'Default model for every AI task. Left empty, claude-opus-5-5 is used.',
         env: 'AI_MODEL',
         fromEnv: (c) => c.AI_MODEL,
+        // Client feedback 2026-11: adding the API key alone is enough to start.
+        fallback: () => DEFAULT_AI_MODEL,
         check: pattern(/^[A-Za-z0-9._:@/-]{1,100}$/, 'is not a model id'),
       },
       {

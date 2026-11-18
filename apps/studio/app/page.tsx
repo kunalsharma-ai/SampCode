@@ -27,11 +27,9 @@ import {
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
-import { PRESET_LIST, PRESETS } from '@zapx/quantum';
 import { api } from '@/lib/api';
 import { useMe } from '@/lib/useMe';
 import { useThemeModule } from '@/lib/theme/ThemeProvider';
-import { useTheme } from '@/lib/theme/ThemeProvider';
 import { ErrorNote, Shell } from '@/components/Shell';
 import { ProjectsSection } from '@/components/neon/ProjectsSection';
 import { CreateSurveyDialog, type StartMode } from '@/components/neon/CreateSurvey';
@@ -123,7 +121,6 @@ const ORBIT: Array<[string, LucideIcon]> = [
 export default function DashboardPage() {
   const me = useMe();
   useThemeModule('dashboard');
-  const { appearance, resolved, update } = useTheme();
   const [data, setData] = useState<Summary | null>(null);
   const [ai, setAi] = useState<{ configured: boolean; model?: string } | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -144,7 +141,6 @@ export default function DashboardPage() {
   const finished = r ? r.total - (r.byStatus.IN_PROGRESS ?? 0) : 0;
   const completes = r?.byStatus.COMPLETE ?? 0;
   const last7 = useMemo(() => (data ? data.trend.slice(-7).reduce((n, d) => n + d.starts, 0) : 0), [data]);
-  const scheme = resolved.scheme;
 
   const capabilities: Array<{ label: string; hint: string; icon: LucideIcon; href: string | null }> = [
     { label: 'Visual survey builder', hint: 'Pages, questions, media', icon: LayoutTemplate, href: tabLink('build') },
@@ -506,62 +502,6 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          {/* ---- Recent surveys ---- */}
-          <section className="panel nx-card" aria-labelledby="recent-title">
-            <div className="nx-card-head">
-              <h2 id="recent-title">
-                Recent surveys
-                <InfoTip k="section.dashRecent" />
-              </h2>
-            </div>
-            {!data ? (
-              <p className="muted">Loading…</p>
-            ) : data.recentSurveys.length === 0 ? (
-              <p className="muted">No surveys yet.</p>
-            ) : (
-              <div className="scroll-x">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>Survey</th>
-                      <th>Project</th>
-                      <th>Status</th>
-                      <th className="num">Responses</th>
-                      <th>Completion</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.recentSurveys.map((s) => {
-                      const rate = s.responses ? Math.round((s.completes / s.responses) * 100) : 0;
-                      return (
-                        <tr key={s.id}>
-                          <td>
-                            <Link href={`/surveys/${s.id}`}>{s.name}</Link>
-                          </td>
-                          <td className="muted">{s.projectName}</td>
-                          <td>
-                            <span className={`badge ${s.status.toLowerCase()}`}>{s.status.toLowerCase()}</span>
-                          </td>
-                          <td className="num">{fmt(s.responses)}</td>
-                          <td>
-                            <div className="nx-progress" title={`${fmt(s.completes)} completes of ${fmt(s.responses)} responses`}>
-                              <span className="nx-meter">
-                                <span style={{ width: `${rate}%` }} />
-                              </span>
-                              <span className="small">{s.responses ? `${rate}%` : '–'}</span>
-                            </div>
-                          </td>
-                          <td className="muted small">{new Date(s.updatedAt).toLocaleDateString()}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
           <ProjectsSection limit={8} heading="Projects" onCreated={load} />
         </div>
 
@@ -620,40 +560,41 @@ export default function DashboardPage() {
 
           <LatestSurveyPreview survey={latest} />
 
-          <section className="panel nx-card" aria-labelledby="look-title">
+          {/* ---- Recent surveys: a small box in the rail (client feedback 2026-11) ---- */}
+          <section className="panel nx-card nx-recent-mini" aria-labelledby="recent-title">
             <div className="nx-card-head">
-              <h2 id="look-title">
-                Choose your look
-                <InfoTip k="section.dashLook" />
+              <h2 id="recent-title">
+                Recent surveys
+                <InfoTip k="section.dashRecent" />
               </h2>
-              <Link href="/appearance" className="small">
-                More options
+              <Link href="/projects" className="small">
+                All
               </Link>
             </div>
-            <div className="nx-swatches" role="radiogroup" aria-label="Theme">
-              {PRESET_LIST.map((p) => {
-                const seed = p[scheme];
-                const accent = seed.accent ?? p.accents[0];
-                return (
-                  <button
-                    key={p.id}
-                    role="radio"
-                    aria-checked={appearance.preset === p.id}
-                    aria-label={p.name}
-                    title={p.name}
-                    className="nx-swatch"
-                    onClick={() => update({ preset: p.id })}
-                    style={{
-                      background: `radial-gradient(circle at 25% 25%, ${p.accents[2]} 0, transparent 45%), radial-gradient(circle at 80% 70%, ${p.accents[1]} 0, transparent 55%), linear-gradient(135deg, ${accent}, ${seed.bg})`,
-                    }}
-                  />
-                );
-              })}
-            </div>
-            <p className="small muted" style={{ margin: '10px 0 0' }}>
-              {PRESETS[appearance.preset].name} · {scheme} · saved to your account
-            </p>
+            {!data ? (
+              <p className="muted small">Loading…</p>
+            ) : data.recentSurveys.length === 0 ? (
+              <p className="muted small">No surveys yet.</p>
+            ) : (
+              <ul className="nx-recent-list">
+                {data.recentSurveys.slice(0, 6).map((s) => {
+                  const rate = s.responses ? Math.round((s.completes / s.responses) * 100) : 0;
+                  return (
+                    <li key={s.id}>
+                      <Link href={`/surveys/${s.id}`} className="nx-recent-name" title={`${s.name} · ${s.projectName}`}>
+                        {s.name}
+                      </Link>
+                      <span className={`badge ${s.status.toLowerCase()}`}>{s.status.toLowerCase()}</span>
+                      <span className="small muted nx-recent-meta" title={`${fmt(s.completes)} completes of ${fmt(s.responses)} responses`}>
+                        {fmt(s.responses)} resp. · {s.responses ? `${rate}%` : '–'} · {new Date(s.updatedAt).toLocaleDateString()}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
+
           <p className="small muted nx-generated">
             <MousePointerClick size={13} aria-hidden="true" /> Numbers exclude test responses. Updated{' '}
             {data ? new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '…'}.

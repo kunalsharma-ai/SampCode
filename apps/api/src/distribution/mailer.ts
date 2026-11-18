@@ -64,5 +64,8 @@ export class SendGridProvider implements EmailProvider {
 export function emailProvider(): EmailProvider | null {
   const e = integration('sendgrid');
   if (!e.enabled) return null;
-  return new SendGridProvider(e.values.apiKey!, config().SENDGRID_API_BASE, { email: e.values.fromEmail!, name: e.values.fromName || 'SampCode surveys' });
+  return new SendGridProvider(e.values.apiKey!, config().SENDGRID_API_BASE, {
+    email: e.values.fromEmail!,
+    name: e.values.fromName || 'SampCode surveys',
+  });
 }
