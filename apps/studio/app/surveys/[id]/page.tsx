@@ -42,6 +42,8 @@ import {
   Eye,
   FlaskConical,
   Languages as LanguagesIcon,
+  Maximize2,
+  Minimize2,
   Paintbrush,
   PencilRuler,
   Send,
@@ -131,6 +133,26 @@ export default function SurveyPage({ params }: { params: Promise<{ id: string }>
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Client feedback 2026-11: a full-page builder. The menu and top bar can be hidden, and once you
+  // scroll the header scrolls away and the section tabs stay on top.
+  const [fullPage, setFullPage] = useState(false);
+  const [published, setPublished] = useState<PublishedLinks | null>(null);
+  useEffect(() => {
+    try {
+      setFullPage(localStorage.getItem('sampcode-full-page') === '1');
+    } catch {
+      // Storage blocked: start with the menu shown.
+    }
+  }, []);
+  useEffect(() => {
+    document.documentElement.classList.toggle('nx-full-page', fullPage);
+    try {
+      localStorage.setItem('sampcode-full-page', fullPage ? '1' : '0');
+    } catch {
+      // Not remembered; fine.
+    }
+    return () => document.documentElement.classList.remove('nx-full-page');
+  }, [fullPage]);
 
   const load = useCallback(async () => {
     try {
@@ -234,6 +256,19 @@ export default function SurveyPage({ params }: { params: Promise<{ id: string }>
       const r = await api<{ version: { version: number } }>(`/surveys/${id}/publish`, { method: 'POST' });
       setNotice(`Published version ${r.version.version}. Respondents now receive it.`);
       await load();
+      // Client feedback 2026-11: show the test and live links right away, then go on to the reports.
+      const links: PublishedLinks = { version: r.version.version, test: null, live: [] };
+      try {
+        links.test = (await api<{ url: string }>(`/surveys/${id}/links`, { body: { test: true } })).url;
+        const vendors = survey ? await api<Vendor[]>(`/projects/${survey.projectId}/vendors`) : [];
+        for (const v of vendors) {
+          const l = await api<{ url: string; template: string | null }>(`/surveys/${id}/links`, { body: { vendorId: v.id, uid: 'UID' } });
+          links.live.push({ vendor: `${v.name} (${v.code})`, url: l.template ?? l.url });
+        }
+      } catch {
+        // The links stay available on the Distribution tab.
+      }
+      setPublished(links);
     } catch (e) {
       setError(e);
     } finally {
@@ -266,37 +301,51 @@ export default function SurveyPage({ params }: { params: Promise<{ id: string }>
         title={survey.name}
         help="page.survey"
         actions={
-          !readOnly ? (
-            <>
-              <VoiceCommandButton
-                language={def.language}
-                onCommand={(c, heard) => {
-                  if (c.kind === 'tab' && (TABS as readonly string[]).includes(c.tab)) {
-                    setTab(c.tab as Tab);
-                    setNotice(`Heard “${heard}”.`);
-                  } else if (c.kind === 'save') {
-                    setNotice(`Heard “${heard}”.`);
-                    if (unsaved) void save();
-                  } else if (c.kind === 'ai') {
-                    setVoiceInstruction({ text: c.instruction, n: Date.now() });
-                    setTab('assist');
-                    setNotice(`Heard “${heard}”. Check the instruction, then draft the proposal.`);
-                  } else setNotice(`Heard “${heard}”, but that is not a command.`);
-                }}
-              />
-              <button onClick={save} disabled={busy || !unsaved}>
-                Save draft
-              </button>
-              <button
-                className="primary"
-                onClick={publish}
-                disabled={busy || !publishable}
-                title={publishable ? '' : languageBlockers.length ? languageBlockers.join(' ') : 'Fix the errors in the logic check first'}
-              >
-                Publish
-              </button>
-            </>
-          ) : null
+          <>
+            <button
+              type="button"
+              aria-pressed={fullPage}
+              onClick={() => setFullPage((f) => !f)}
+              title={fullPage ? 'Show the menu and top bar again' : 'Hide the menu and top bar to use the whole page'}
+              data-testid="full-page-toggle"
+            >
+              {fullPage ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+              {fullPage ? 'Exit full page' : 'Full page'}
+            </button>
+            {!readOnly ? (
+              <>
+                <VoiceCommandButton
+                  language={def.language}
+                  onCommand={(c, heard) => {
+                    if (c.kind === 'tab' && (TABS as readonly string[]).includes(c.tab)) {
+                      setTab(c.tab as Tab);
+                      setNotice(`Heard “${heard}”.`);
+                    } else if (c.kind === 'save') {
+                      setNotice(`Heard “${heard}”.`);
+                      if (unsaved) void save();
+                    } else if (c.kind === 'ai') {
+                      setVoiceInstruction({ text: c.instruction, n: Date.now() });
+                      setTab('assist');
+                      setNotice(`Heard “${heard}”. Check the instruction, then draft the proposal.`);
+                    } else setNotice(`Heard “${heard}”, but that is not a command.`);
+                  }}
+                />
+                <button onClick={save} disabled={busy || !unsaved}>
+                  Save draft
+                </button>
+                <button
+                  className="primary"
+                  onClick={publish}
+                  disabled={busy || !publishable}
+                  title={
+                    publishable ? '' : languageBlockers.length ? languageBlockers.join(' ') : 'Fix the errors in the logic check first'
+                  }
+                >
+                  Publish
+                </button>
+              </>
+            ) : null}
+          </>
         }
       >
         <span className="row small">
@@ -311,7 +360,7 @@ export default function SurveyPage({ params }: { params: Promise<{ id: string }>
       {notice ? <p className="ok-text">{notice}</p> : null}
       <ErrorNote error={error} />
 
-      <div className="tabs nx-tabs" role="tablist" aria-label="Survey sections">
+      <div className="tabs nx-tabs nx-sticky-tabs" role="tablist" aria-label="Survey sections">
         {(
           [
             ['build', 'Build'],
@@ -342,6 +391,17 @@ export default function SurveyPage({ params }: { params: Promise<{ id: string }>
         <InfoTip key={tab} k={`tab.${tab}` as const} label="What is this tab for?" />
       </div>
 
+      {published ? (
+        <PublishedDialog
+          links={published}
+          projectId={survey.projectId}
+          onReports={() => {
+            setPublished(null);
+            setTab('results');
+          }}
+          onClose={() => setPublished(null)}
+        />
+      ) : null}
       {tab === 'build' || tab === 'json' ? (
         <div className="editor" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
           <div>
@@ -517,6 +577,90 @@ interface Vendor {
   code: string;
 }
 
+/** Checks from the server that the survey address opens (client feedback 2026-11: links did not open). */
+function SurveyLinkCheck() {
+  const [r, setR] = useState<{ ok: boolean; url: string; hint?: string } | null>(null);
+  useEffect(() => {
+    void api<{ ok: boolean; url: string; hint?: string }>('/health/survey-links').then(setR, () => undefined);
+  }, []);
+  if (!r || r.ok) return null;
+  return (
+    <div className="issue error" role="status" data-testid="survey-link-problem">
+      <div>
+        <strong>Survey links do not open yet.</strong> {r.hint}
+      </div>
+      <div className="loc">{r.url}</div>
+    </div>
+  );
+}
+
+interface PublishedLinks {
+  version: number;
+  test: string | null;
+  live: Array<{ vendor: string; url: string }>;
+}
+
+/** After publishing: the test link and each vendor's live link, then on to the reports to collect data. */
+function PublishedDialog({
+  links,
+  projectId,
+  onReports,
+  onClose,
+}: {
+  links: PublishedLinks;
+  projectId: string;
+  onReports: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <section className="panel stack nx-published" aria-labelledby="published-title" data-testid="published-dialog">
+      <div className="row">
+        <h2 id="published-title" style={{ margin: 0 }}>
+          Version {links.version} is published
+        </h2>
+        <div style={{ flex: 1 }} />
+        <button className="icon" aria-label="Close" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        Try it with the test link first; the live link is what you give the sample vendor (they put the respondent id in place of [UID] or
+        UID).
+      </p>
+      <h3 style={{ margin: '8px 0 0' }}>Test link</h3>
+      {links.test ? (
+        <>
+          <CopyField label="Published test link" value={links.test} />
+          <a href={links.test} target="_blank" rel="noreferrer">
+            Open the published test link
+          </a>
+        </>
+      ) : (
+        <p className="muted small">Create it on the Distribution tab.</p>
+      )}
+      <h3 style={{ margin: '8px 0 0' }}>Live link</h3>
+      {links.live.length ? (
+        links.live.map((l) => (
+          <div key={l.vendor} className="stack" style={{ gap: 4 }}>
+            <span className="small">{l.vendor}</span>
+            <CopyField label={`Published live link for ${l.vendor}`} value={l.url} />
+          </div>
+        ))
+      ) : (
+        <p className="muted small">
+          No sample vendor yet. <Link href={`/projects/${projectId}`}>Add a vendor on the project page</Link> to get the live link.
+        </p>
+      )}
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="primary" onClick={onReports} data-testid="go-to-reports">
+          Go to reports to collect data
+        </button>
+        <button onClick={onClose}>Stay here</button>
+      </div>
+    </section>
+  );
+}
+
 function Distribute({ survey, readOnly, onChanged }: { survey: SurveyDetail; readOnly: boolean; onChanged: () => void }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorId, setVendorId] = useState('');
@@ -559,121 +703,124 @@ function Distribute({ survey, readOnly, onChanged }: { survey: SurveyDetail; rea
 
   if (!survey.liveVersionId) return <p className="muted">Publish the survey to get links.</p>;
   return (
-    <div className="grid2">
-      <section className="panel stack">
-        <h2>
-          Vendor links
-          <InfoTip k="section.vendorLinks" />
-        </h2>
-        {vendors.length === 0 ? (
-          <p className="muted">
-            Add a vendor on the <Link href={`/projects/${survey.projectId}`}>project page</Link> first.
-          </p>
-        ) : (
-          <>
-            <div className="row">
-              <label className="field">
-                Vendor
-                <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-                  {vendors.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} ({v.code})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                UID (for a single link)
-                <input value={uid} onChange={(e) => setUid(e.target.value)} placeholder="e.g. 12345" />
-              </label>
-              <label className="field">
-                Country code
-                <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="US" style={{ width: 70 }} />
-              </label>
-            </div>
-            <div>
-              <button onClick={() => make(false)} disabled={readOnly || !uid}>
-                Generate link
-              </button>
-            </div>
-            {link ? (
-              <>
-                {link.template ? (
-                  <>
-                    <span className="small muted">Template to give the vendor (they replace [UID]):</span>
-                    <CopyField label="Vendor link template" value={link.template} />
-                  </>
-                ) : null}
-                <span className="small muted">Link for UID {uid}:</span>
-                <CopyField label="Respondent link" value={link.url} />
-              </>
-            ) : null}
-          </>
-        )}
-        <h2 style={{ marginTop: 12 }}>
-          Test link
-          <InfoTip k="section.testLink" />
-        </h2>
-        <p className="muted small">Test responses are flagged, excluded from quotas and exports by default, and never redirect.</p>
-        <div>
-          <button onClick={() => make(true)} disabled={readOnly}>
-            Create test link
-          </button>
-        </div>
-        {testLink ? (
-          <>
-            <CopyField label="Test link" value={testLink} />
-            <a href={testLink} target="_blank" rel="noreferrer" data-testid="open-test-link">
-              Open test link
-            </a>
-          </>
-        ) : null}
-        <ErrorNote error={error} />
-      </section>
-      <section className="panel stack">
-        <h2>
-          Field status
-          <InfoTip k="section.fieldStatus" />
-        </h2>
-        <p>
-          Currently <span className={`badge ${survey.status.toLowerCase()}`}>{survey.status.toLowerCase()}</span>
-        </p>
-        <p className="muted small">
-          Paused and closed surveys send new respondents to the quota-full redirect. Respondents already in progress can finish.
-        </p>
-        {!readOnly ? (
-          <div className="row">
-            <button onClick={() => setStatus('LIVE')} disabled={survey.status === 'LIVE'}>
-              Go live
-            </button>
-            <button onClick={() => setStatus('PAUSED')} disabled={survey.status === 'PAUSED'}>
-              Pause
-            </button>
-            <button className="danger" onClick={() => setStatus('CLOSED')} disabled={survey.status === 'CLOSED'}>
-              Close
+    <>
+      <SurveyLinkCheck />
+      <div className="grid2">
+        <section className="panel stack">
+          <h2>
+            Vendor links
+            <InfoTip k="section.vendorLinks" />
+          </h2>
+          {vendors.length === 0 ? (
+            <p className="muted">
+              Add a vendor on the <Link href={`/projects/${survey.projectId}`}>project page</Link> first.
+            </p>
+          ) : (
+            <>
+              <div className="row">
+                <label className="field">
+                  Vendor
+                  <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+                    {vendors.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.code})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  UID (for a single link)
+                  <input value={uid} onChange={(e) => setUid(e.target.value)} placeholder="e.g. 12345" />
+                </label>
+                <label className="field">
+                  Country code
+                  <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="US" style={{ width: 70 }} />
+                </label>
+              </div>
+              <div>
+                <button onClick={() => make(false)} disabled={readOnly || !uid}>
+                  Generate link
+                </button>
+              </div>
+              {link ? (
+                <>
+                  {link.template ? (
+                    <>
+                      <span className="small muted">Template to give the vendor (they replace [UID]):</span>
+                      <CopyField label="Vendor link template" value={link.template} />
+                    </>
+                  ) : null}
+                  <span className="small muted">Link for UID {uid}:</span>
+                  <CopyField label="Respondent link" value={link.url} />
+                </>
+              ) : null}
+            </>
+          )}
+          <h2 style={{ marginTop: 12 }}>
+            Test link
+            <InfoTip k="section.testLink" />
+          </h2>
+          <p className="muted small">Test responses are flagged, excluded from quotas and exports by default, and never redirect.</p>
+          <div>
+            <button onClick={() => make(true)} disabled={readOnly}>
+              Create test link
             </button>
           </div>
-        ) : null}
-        <h3>Versions</h3>
-        <table className="data">
-          <tbody>
-            {survey.versions.map((v) => (
-              <tr key={v.id}>
-                <td>v{v.version}</td>
-                <td>
-                  <span className="badge">{v.status.toLowerCase()}</span>
-                </td>
-                <td className="muted small">
-                  {v.publishedAt
-                    ? `published ${new Date(v.publishedAt).toLocaleString()}`
-                    : `edited ${new Date(v.updatedAt).toLocaleString()}`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </div>
+          {testLink ? (
+            <>
+              <CopyField label="Test link" value={testLink} />
+              <a href={testLink} target="_blank" rel="noreferrer" data-testid="open-test-link">
+                Open test link
+              </a>
+            </>
+          ) : null}
+          <ErrorNote error={error} />
+        </section>
+        <section className="panel stack">
+          <h2>
+            Field status
+            <InfoTip k="section.fieldStatus" />
+          </h2>
+          <p>
+            Currently <span className={`badge ${survey.status.toLowerCase()}`}>{survey.status.toLowerCase()}</span>
+          </p>
+          <p className="muted small">
+            Paused and closed surveys send new respondents to the quota-full redirect. Respondents already in progress can finish.
+          </p>
+          {!readOnly ? (
+            <div className="row">
+              <button onClick={() => setStatus('LIVE')} disabled={survey.status === 'LIVE'}>
+                Go live
+              </button>
+              <button onClick={() => setStatus('PAUSED')} disabled={survey.status === 'PAUSED'}>
+                Pause
+              </button>
+              <button className="danger" onClick={() => setStatus('CLOSED')} disabled={survey.status === 'CLOSED'}>
+                Close
+              </button>
+            </div>
+          ) : null}
+          <h3>Versions</h3>
+          <table className="data">
+            <tbody>
+              {survey.versions.map((v) => (
+                <tr key={v.id}>
+                  <td>v{v.version}</td>
+                  <td>
+                    <span className="badge">{v.status.toLowerCase()}</span>
+                  </td>
+                  <td className="muted small">
+                    {v.publishedAt
+                      ? `published ${new Date(v.publishedAt).toLocaleString()}`
+                      : `edited ${new Date(v.updatedAt).toLocaleString()}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </>
   );
 }
 

@@ -11,6 +11,27 @@ import { CAN_EDIT } from '../auth/decorators';
 
 const createSchema = z.object({ name: z.string().min(1).max(200), client: z.string().max(200).optional() });
 
+export const PROJECT_STATUSES = ['DRAFT', 'UNDER_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'COMPLETED'] as const;
+export type ProjectStatusName = (typeof PROJECT_STATUSES)[number];
+const statusSchema = z.object({ status: z.enum(PROJECT_STATUSES).nullable() });
+
+/**
+ * The status shown for a project (client feedback 2026-11). Field work is a fact, so a live survey
+ * makes the project running, then paused or completed, unless the team set one of those itself;
+ * before field work the team's draft / under approval / approved applies (draft when unset).
+ */
+export function projectStatus(set: ProjectStatusName | null | undefined, surveys: Array<{ status: string }>): ProjectStatusName {
+  const derived: ProjectStatusName | null = surveys.some((s) => s.status === 'LIVE')
+    ? 'RUNNING'
+    : surveys.some((s) => s.status === 'PAUSED')
+      ? 'PAUSED'
+      : surveys.length > 0 && surveys.every((s) => s.status === 'CLOSED')
+        ? 'COMPLETED'
+        : null;
+  if (set === 'RUNNING' || set === 'PAUSED' || set === 'COMPLETED') return set;
+  return derived ?? set ?? 'DRAFT';
+}
+
 export class ProjectsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -18,12 +39,31 @@ export class ProjectsController {
     private readonly access: AccessService,
   ) {}
 
-  list(user: AuthUser) {
-    return this.prisma.project.findMany({
+  async list(user: AuthUser) {
+    const projects = await this.prisma.project.findMany({
       where: this.access.projects(user),
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { surveys: { where: { deletedAt: null } }, vendors: { where: { deletedAt: null } } } } },
+      include: {
+        _count: { select: { surveys: { where: { deletedAt: null } }, vendors: { where: { deletedAt: null } } } },
+        surveys: { where: { deletedAt: null }, select: { status: true, updatedAt: true } },
+      },
     });
+    return projects.map(({ surveys, ...p }) => ({
+      ...p,
+      statusSet: p.status ?? null,
+      status: projectStatus(p.status, surveys),
+      // Last change to the project or its surveys, for "recently updated" sorting.
+      updatedAt: new Date(Math.max(p.createdAt.getTime(), ...surveys.map((x) => x.updatedAt.getTime()))).toISOString(),
+    }));
+  }
+
+  async setStatus(user: AuthUser, id: string, body: unknown) {
+    const { status } = parseBody(statusSchema, body);
+    const project = await this.prisma.project.findFirst({ where: { id, ...this.access.projects(user) } });
+    if (!project) throw new NotFoundException('Project not found');
+    await this.prisma.project.update({ where: { id }, data: { status } });
+    await this.audit.record(user, 'project.status', 'project', id, { before: project.status ?? null, after: status });
+    return this.get(user, id);
   }
 
   async create(user: AuthUser, body: unknown) {
@@ -53,7 +93,7 @@ export class ProjectsController {
       },
     });
     if (!project) throw new NotFoundException('Project not found');
-    return project;
+    return { ...project, statusSet: project.status ?? null, status: projectStatus(project.status, project.surveys) };
   }
 
   /**
@@ -107,6 +147,12 @@ export function projectsControllerRoutes(r: Router, c: ProjectsController, kit: 
   r.get(
     '/api/projects/:id',
     ...kit.route({ controller: 'ProjectsController', handler: 'get', method: 'get' }, (req) => c.get(req.user as AuthUser, req.params.id)),
+  );
+  r.put(
+    '/api/projects/:id/status',
+    ...kit.route({ controller: 'ProjectsController', handler: 'setStatus', method: 'put', roles: [...CAN_EDIT] }, (req) =>
+      c.setStatus(req.user as AuthUser, req.params.id, req.body),
+    ),
   );
   r.delete(
     '/api/projects/:id',
