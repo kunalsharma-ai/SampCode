@@ -18,7 +18,8 @@ test('appearance settings apply live, follow the member and fall back to the org
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
 
-  // Quick switcher in the top bar: every theme and the colour mode, one click each.
+  // Quick switcher on the Settings page (the one place to pick a theme): every theme and the colour mode, one click each.
+  await page.goto('/settings');
   await page.getByTestId('theme-menu').click();
   await page.getByRole('dialog', { name: 'Theme' }).getByRole('radio', { name: 'Solar Titanium' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-q-theme', 'solar-titanium');
@@ -92,6 +93,7 @@ test('appearance settings apply live, follow the member and fall back to the org
   await m.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(m.getByRole('heading', { name: 'Projects' })).toBeVisible();
   await expect(m.locator('html')).toHaveAttribute('data-q-theme', 'royal-amethyst');
+  await m.goto('/settings');
   await m.getByTestId('theme-menu').click();
   await m.getByTestId('appearance-link').click();
   await expect(m.getByTestId('appearance-source')).toContainText('organization’s default');

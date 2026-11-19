@@ -31,6 +31,10 @@ export const INTEGRATION_KEYS = [
   'sampleon',
   'cdn',
 ] as const;
+/** Model used when none is chosen in the CRM. */
+export const DEFAULT_AI_MODEL = 'claude-opus-5-5';
+
+export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 export const isIntegrationKey = (k: string): k is IntegrationKey => (INTEGRATION_KEYS as readonly string[]).includes(k);
 
@@ -127,7 +131,9 @@ export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
         name: 'model',
         label: 'Model',
         required: true,
-        help: 'Default model for every AI task, e.g. claude-opus-5-5.',
+        help: 'Default model for every AI task. Left empty, claude-opus-5-5 is used.',
+        // Client feedback 2026-11: adding the API key alone is enough to start.
+        fallback: () => DEFAULT_AI_MODEL,
         check: pattern(/^[A-Za-z0-9._:@/-]{1,100}$/, 'is not a model id'),
       },
       {

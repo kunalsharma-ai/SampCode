@@ -3,7 +3,7 @@ import { config, type ModelPrice } from '../config';
 import { integration } from '../platform/integrations';
 import { type AuditService } from '../common/audit.service';
 import { AiError, type AiProvider, type AiTokenUsage } from './ai-provider';
-import { notConfigured } from './claude.provider';
+import { aiSetupReason, notConfigured } from './claude.provider';
 import { type AiUsageRepository } from './ai-usage.repository';
 import { CircuitBreaker } from './circuit-breaker';
 
@@ -107,6 +107,8 @@ export class AiGateway {
     );
     return {
       configured: this.configured,
+      /** Why AI is off and who turns it on where (empty when it works). */
+      setup: this.configured ? null : aiSetupReason(),
       provider: this.provider.name,
       model: this.provider.model || null,
       tasks,

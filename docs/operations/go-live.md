@@ -98,6 +98,17 @@ reaches every server and the background worker within 15 seconds, with no restar
 | Amazon S3    | Bucket, region and access keys (only when files go to S3 instead of the server)                                                                                   | The S3 console                                                        |
 | SampAudience | Address, client secret and outcome secret                                                                                                                         | The SampAudience team                                                 |
 | CDN          | Only with a CDN in front: the shared secret it sends as `X-Zapx-Edge`                                                                                             | Your own random value (`openssl rand -hex 32`)                        |
+| Integration  | What it needs                                                                    | Where to get it                                                       |
+| ------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Claude       | API key; model optional (defaults to `claude-opus-5-5`), per-task models, prices | console.anthropic.com → API keys                                      |
+| IPinfo       | Access token on a plan with privacy detection                                    | ipinfo.io → Token                                                     |
+| Deepgram     | API key and model (e.g. `nova-3`)                                                | console.deepgram.com → API keys                                       |
+| Twilio       | Account SID, auth token, a caller ID (phone dialer) and/or an SMS sender         | console.twilio.com → Account info, Phone numbers                      |
+| SendGrid     | API key with Mail Send, a verified sender address (invitations, password resets) | app.sendgrid.com → Settings → API Keys, Sender Authentication         |
+| Stripe       | Secret key, webhook signing secret, plan prices (`{"team":"price_..."}`)         | dashboard.stripe.com → Developers; add the webhook URL the page shows |
+| Amazon S3    | Bucket, region and access keys (only when files go to S3 instead of the server)  | The S3 console                                                        |
+| SampAudience | Address, client secret and outcome secret                                        | The SampAudience team                                                 |
+| CDN          | Only with a CDN in front: the shared secret it sends as `X-Zapx-Edge`            | Your own random value (`openssl rand -hex 32`)                        |
 
 The super admin console (Super admin → Integrations) shows the same integrations for the whole
 installation. For scripted installs, `node apps/api/dist/cli/set-integration.js <key> -` saves one
@@ -118,6 +129,18 @@ How it is kept safe:
 Set up per organization (each customer connects its own, on the main Settings page): single sign-on
 (OIDC and SAML), SCIM, webhooks, API keys and AI limits. PROJEXA and other sample vendors are set up
 per project under Vendors.
+
+## Troubleshooting survey links and AI
+
+- **Survey links do not open (`ERR_SSL_UNRECOGNIZED_NAME_ALERT` or a certificate error).** The
+  respondent domain is not served by Caddy. Set `RUNTIME_DOMAIN` (for example
+  `survey-zapx.sampledge.com`) in `.env.production`, point that name's DNS A record at the server,
+  and restart the stack with `docker compose -f docker-compose.prod.yml up -d`. Caddy then fetches
+  its certificate. The survey's Distribute tab and the panel shown after publishing run the same
+  check (`GET /api/health/survey-links`) and say what is wrong.
+- **AI assistant says it is not set up.** The Claude key is missing or turned off. A super admin
+  opens **Super admin → Integrations → Claude (Anthropic)**, pastes the API key, presses **Test
+  connection**, ticks **Turn on** and saves. The model can stay empty.
 
 ## What still needs a developer
 

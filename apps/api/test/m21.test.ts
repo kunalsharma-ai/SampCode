@@ -156,7 +156,8 @@ describe('who can manage integrations', () => {
     const model = dg.fields.find((f: { name: string }) => f.name === 'model');
     expect(model).toMatchObject({ origin: 'none', value: '' });
     expect(model).not.toHaveProperty('env');
-    expect(integration('anthropic')).toMatchObject({ enabled: false, values: { apiKey: '', model: '' } });
+    // The model falls back to claude-opus-5-5 (client feedback 2026-11); the key is still empty.
+    expect(integration('anthropic')).toMatchObject({ enabled: false, values: { apiKey: '', model: 'claude-opus-5-5' } });
     expect(retiredEnvInUse()).toEqual(expect.arrayContaining(['ANTHROPIC_API_KEY', 'DEEPGRAM_API_KEY', 'TRANSCRIPTION']));
     const sendgrid = list.find((i: { key: string }) => i.key === 'sendgrid');
     expect(sendgrid.fields.find((f: { name: string }) => f.name === 'fromName')).toMatchObject({
@@ -247,7 +248,7 @@ describe('test connection', () => {
     expect(wrong.message).toMatch(/privacy detection/);
 
     const untested = (await http.post('/api/platform/integrations/anthropic/test').set(admin).send({}).expect(200)).body;
-    expect(untested).toMatchObject({ ok: false, message: 'Fill in API key, Model first.' });
+    expect(untested).toMatchObject({ ok: false, message: 'Fill in API key first.' });
     const model = (
       await http
         .post('/api/platform/integrations/anthropic/test')
