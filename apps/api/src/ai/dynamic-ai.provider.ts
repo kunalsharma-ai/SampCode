@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { integration } from '../platform/integrations';
 import { AiProvider, type ArchitectRequest, type ArchitectResult, type TranslateRequest, type TranslateResult } from './ai-provider';
-import { ClaudeAiProvider, UnconfiguredAiProvider } from './claude.provider';
+import { ClaudeAiProvider, UnconfiguredAiProvider, aiSetupReason } from './claude.provider';
 
 /**
  * The AI provider set up in Settings > Integrations.
@@ -15,11 +15,7 @@ export class DynamicAiProvider extends AiProvider {
     if (this.built?.fingerprint === s.fingerprint) return this.built.provider;
     const cfg = config();
     let provider: AiProvider;
-    if (!s.values.apiKey)
-      provider = new UnconfiguredAiProvider('An administrator needs to add the Claude API key in Settings > Integrations.');
-    else if (!s.values.model)
-      provider = new UnconfiguredAiProvider('An administrator needs to choose the Claude model in Settings > Integrations.');
-    else if (!s.enabled) provider = new UnconfiguredAiProvider('An administrator has turned Claude off in Settings > Integrations.');
+    if (!s.enabled) provider = new UnconfiguredAiProvider(aiSetupReason());
     else
       provider = new ClaudeAiProvider(s.values.apiKey, s.values.model, {
         maxRetries: cfg.AI_MAX_RETRIES,

@@ -51,7 +51,8 @@ export function textKeys(def: SurveyDefinition, presentation?: Pick<Presentation
         add(`q.${q.id}.minLabel`, q.minLabel, `${q.id} low end label`);
         add(`q.${q.id}.maxLabel`, q.maxLabel, `${q.id} high end label`);
       }
-      if (q.type === 'scale' && q.dontKnow) add(`q.${q.id}.dontKnow`, q.dontKnow.label, `${q.id} answer ${q.dontKnow.code}`);
+      if ((q.type === 'scale' || q.type === 'open' || q.type === 'numeric') && q.dontKnow)
+        add(`q.${q.id}.dontKnow`, q.dontKnow.label, `${q.id} answer ${q.dontKnow.code}`);
       if (q.type === 'sum') add(`q.${q.id}.unit`, q.unit, `${q.id} unit`);
       if (q.type === 'grid') {
         q.rows.forEach((r) => add(`q.${q.id}.row.${r.id}`, r.label, `${q.id} row ${r.id}`));
@@ -98,7 +99,9 @@ export function localizeDefinition(def: SurveyDefinition, lang: Language | undef
     pages: def.pages.map((p) => ({
       ...p,
       title: tOpt(`page.${p.id}.title`, p.title),
-      questions: p.questions.map((q) => {
+      questions: p.questions.map((source) => {
+        // Custom HTML is written in the source language: a translated question shows its translated text.
+        const q = source.html && lang.texts[`q.${source.id}.text`]?.text.trim() ? { ...source, html: undefined } : source;
         const text = t(`q.${q.id}.text`, q.text);
         const media = q.media
           ? { ...q.media, alt: t(`q.${q.id}.media.alt`, q.media.alt), caption: tOpt(`q.${q.id}.media.caption`, q.media.caption) }
@@ -148,13 +151,19 @@ export function localizeDefinition(def: SurveyDefinition, lang: Language | undef
             columns: base.columns.map((c) => ({ ...c, label: t(`q.${q.id}.col.${c.code}`, c.label) })),
           };
         }
+        const dontKnow =
+          (base.type === 'numeric' || base.type === 'open') && base.dontKnow
+            ? { ...base.dontKnow, label: t(`q.${q.id}.dontKnow`, base.dontKnow.label) }
+            : undefined;
         if (base.type === 'numeric')
           return {
             ...base,
             unit: tOpt(`q.${q.id}.unit`, base.unit),
             minLabel: tOpt(`q.${q.id}.minLabel`, base.minLabel),
             maxLabel: tOpt(`q.${q.id}.maxLabel`, base.maxLabel),
+            dontKnow,
           };
+        if (base.type === 'open') return { ...base, dontKnow };
         return base;
       }),
     })),

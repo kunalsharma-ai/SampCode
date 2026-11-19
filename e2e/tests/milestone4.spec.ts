@@ -51,7 +51,8 @@ test('redirect rules, callbacks, vendor logs and AI settings', async ({ page, co
 
   // Project default for terminates
   const defaults = page.getByTestId('project-redirect-defaults');
-  await defaults.getByRole('button', { name: 'Edit defaults' }).click();
+  // A project without default links opens the editor straight away.
+  await expect(defaults.getByRole('button', { name: 'Hide' })).toBeVisible();
   await defaults.getByLabel('Terminate URL', { exact: true }).fill('https://project.test/t?u=[UID]&s=[STATUS]');
   await defaults.getByRole('button', { name: 'Save defaults' }).click();
   await expect(defaults.getByText('Saved')).toBeVisible();

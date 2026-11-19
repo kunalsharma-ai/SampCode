@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import { api, hasFeature, type Me } from '@/lib/api';
 import { useMe } from '@/lib/useMe';
-import { ThemeMenu } from '@/components/quantum/ThemeMenu';
 import { BrandMark, BrandWordmark } from '@/components/neon/Brand';
 import { GlobalSearch } from '@/components/neon/GlobalSearch';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -206,7 +205,6 @@ export function Shell({ children, crumbs, forInterviewers }: { children: ReactNo
           {crumbs ? <nav className="muted small nx-crumbs">{crumbs}</nav> : null}
           <div className="spacer" />
           {me && me.role !== 'INTERVIEWER' ? <NotificationBell /> : null}
-          <ThemeMenu />
           {me ? (
             <div className="nx-user" title={`${me.name} · ${me.email}`}>
               <span className="nx-avatar" aria-hidden="true">

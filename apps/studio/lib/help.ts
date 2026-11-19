@@ -1119,3 +1119,18 @@ export const HELP: Record<HelpKey, HelpEntry> = entries;
 
 /** Help key for a question type (every type in the survey schema has one). */
 export const qtypeHelp = (type: string): HelpKey => (`qtype.${type}` in entries ? (`qtype.${type}` as HelpKey) : 'section.question');
+
+/**
+ * Info box for a question created from the question library: the library's description first, then
+ * how to use the underlying question type, and the library's note (what to set up) as the tip.
+ */
+export function catalogHelp(type: { no: number; name: string; description: string; note?: string }, baseType: string): HelpEntry {
+  const base = HELP[qtypeHelp(baseType)];
+  return {
+    title: `${type.no}. ${type.name}`,
+    what: `${type.description}.`,
+    how: base.how,
+    where: base.where,
+    tip: type.note ?? base.tip,
+  };
+}
