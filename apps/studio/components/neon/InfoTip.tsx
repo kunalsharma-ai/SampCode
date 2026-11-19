@@ -3,7 +3,7 @@
 import { Info, Lightbulb, MapPin, Target, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { HELP, type HelpKey } from '@/lib/help';
+import { HELP, type HelpEntry, type HelpKey } from '@/lib/help';
 
 /**
  * The small neon "i" next to a feature, page section, tab or question type. Hovering (mouse) shows a
@@ -17,8 +17,19 @@ import { HELP, type HelpKey } from '@/lib/help';
  * rendered in a portal with fixed positioning, so panels with `overflow: hidden` never clip it.
  * Escape, a click outside or the close of the page closes it; focus goes back to the button.
  */
-export function InfoTip({ k, label, size = 15 }: { k: HelpKey; /** Visible text after the icon. */ label?: string; size?: number }) {
-  const entry = HELP[k];
+export function InfoTip({
+  k,
+  entry: custom,
+  label,
+  size = 15,
+}: {
+  k?: HelpKey;
+  /** Text to show instead of a `lib/help.ts` entry (e.g. a question library type's description). */
+  entry?: HelpEntry;
+  /** Visible text after the icon. */ label?: string;
+  size?: number;
+}) {
+  const entry = custom ?? (k ? HELP[k] : undefined);
   const id = useId();
   const btn = useRef<HTMLButtonElement>(null);
   const card = useRef<HTMLDivElement>(null);
@@ -90,7 +101,7 @@ export function InfoTip({ k, label, size = 15 }: { k: HelpKey; /** Visible text 
         aria-description={`About ${entry.title}`}
         aria-expanded={!!open}
         aria-controls={open ? id : undefined}
-        data-help={k}
+        data-help={k ?? 'custom'}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

@@ -6,16 +6,13 @@ const optionalString = z
   .optional()
   .transform((v) => (v ? v : undefined));
 
-const pricingSchema = z.record(
-  z.string(),
-  z.object({
-    input: z.number().min(0),
-    output: z.number().min(0),
-    cacheRead: z.number().min(0).optional(),
-    cacheWrite: z.number().min(0).optional(),
-  }),
-);
-export type ModelPrice = z.infer<typeof pricingSchema>[string];
+/** One model's price in USD per million tokens (the price table is set in Settings > Integrations > Claude). */
+export interface ModelPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 
 /** Parts of the example secrets in .env.example and the test setup; never acceptable in production. */
 const KNOWN_DEV_SECRETS = ['dev-only-secret', 'change-me', 'changeme', 'test-secret'];
@@ -23,6 +20,7 @@ const KNOWN_DEV_SECRETS = ['dev-only-secret', 'change-me', 'changeme', 'test-sec
 const schema = z
   .object({
     DATABASE_URL: z.string().min(1),
+    /** Signs sign-in sessions. Made on the first start and kept in the database unless set here (ADR 0043). */
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     API_PORT: z.coerce.number().default(4000),
     RUNTIME_BASE_URL: z.string().url().default('http://localhost:5173'),
@@ -34,38 +32,12 @@ const schema = z
       .transform((v) => v === 'true'),
     /** Sign-ups allowed per minute from one address (raise only for automated test runs). */
     SIGNUP_RATE_PER_MINUTE: z.coerce.number().int().min(1).max(1000).default(5),
-    /** Enables the AI Survey Architect. Without it, AI endpoints answer 503 and everything else works. */
-    ANTHROPIC_API_KEY: z
-      .string()
-      .optional()
-      .transform((v) => (v ? v : undefined)),
-    /**
-     * Model per AI task. No model id is built into the code: AI_MODEL is the default for every
-     * task and AI_MODEL_<TASK> overrides it. AI stays off until a provider key and a model are set.
-     */
-    AI_MODEL: optionalString,
-    AI_MODEL_ARCHITECT: optionalString,
-    AI_MODEL_TRANSLATE: optionalString,
-    AI_MODEL_INSIGHTS: optionalString,
     /** Provider per task (only "anthropic" is implemented; see docs/modules/ai-gateway.md). */
     AI_PROVIDER: z.enum(['anthropic']).default('anthropic'),
     /** Only for tests: an Anthropic-compatible stand-in. */
     ANTHROPIC_API_BASE: z.string().url().default('https://api.anthropic.com'),
     /** How often each process re-reads the integrations saved in the CRM (Settings > Integrations). */
     INTEGRATIONS_REFRESH_MS: z.coerce.number().int().min(1_000).max(600_000).default(15_000),
-    /** Price list in USD per million tokens: {"<model>": {"input": n, "output": n, "cacheRead": n, "cacheWrite": n}}. */
-    AI_PRICING: z
-      .string()
-      .optional()
-      .transform((v, ctx) => {
-        if (!v) return {} as Record<string, ModelPrice>;
-        try {
-          return pricingSchema.parse(JSON.parse(v));
-        } catch {
-          ctx.addIssue({ code: 'custom', message: 'AI_PRICING must be JSON: {"model": {"input": 5, "output": 25}}' });
-          return z.NEVER;
-        }
-      }),
     AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
     AI_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(900_000).default(600_000),
     /** Circuit breaker: consecutive provider failures that open the circuit, and how long it stays open. */
@@ -74,25 +46,16 @@ const schema = z
     /** Defaults for tenants without their own AI policy. */
     AI_DEFAULT_RPM: z.coerce.number().int().min(0).max(10_000).default(10),
     AI_DEFAULT_RPD: z.coerce.number().int().min(0).max(1_000_000).default(500),
-    /** Key for encrypting partner secrets at rest (32+ chars). Falls back to a key derived from JWT_SECRET. */
+    /**
+     * Master key for every secret SampCode keeps in the database (32+ chars; ADR 0043). Set it, or SECRETS_KEY_FILE
+     * (read at start-up by platform/installation-secrets.ts). Development without it: derived from JWT_SECRET.
+     */
     SECRETS_KEY: optionalString.refine((v) => !v || v.length >= 32, 'SECRETS_KEY must be at least 32 characters'),
     /**
      * Derives the keys for test links, network/device hashes and SSO state (security review S5), so
-     * they survive a JWT_SECRET rotation. 32+ chars; required in production. Unset: derived from JWT_SECRET.
+     * they survive a JWT_SECRET rotation. Made on the first start and kept in the database unless set here (ADR 0043).
      */
     SIGNING_KEYS_SECRET: optionalString.refine((v) => !v || v.length >= 32, 'SIGNING_KEYS_SECRET must be at least 32 characters'),
-    /**
-     * SAMPLEON, the Sampledge audience and routing engine (SAMPLEON docs/ECOSYSTEM_ARCHITECTURE.md).
-     * SampCode sends audience requests for independent surveys to SAMPLEON and receives its signed events.
-     * Unset SAMPLEON_URL: the SAMPLEON integration is off.
-     */
-    SAMPLEON_URL: optionalString.refine((v) => !v || /^https?:\/\//.test(v), 'SAMPLEON_URL must be an http(s) URL'),
-    /** SampCode's client id at SAMPLEON. */
-    SAMPLEON_CLIENT_ID: z.string().default('zapx'),
-    /** SampCode's client secret at SAMPLEON: signs SampCode's API calls and verifies SAMPLEON's webhooks. */
-    SAMPLEON_CLIENT_SECRET: optionalString,
-    /** The survey-host outcome secret SAMPLEON holds for SampCode (S2S outcome confirmation). */
-    SAMPLEON_OUTCOME_SECRET: optionalString,
     NODE_ENV: z.string().default('development'),
     /** Callback outbox worker. "off" leaves delivery to another process (or to tests). */
     CALLBACK_WORKER: z.enum(['on', 'off']).default('on'),
@@ -124,57 +87,27 @@ const schema = z
       .regex(/^[a-z0-9-]*$/i)
       .default('')
       .transform((v) => v.toLowerCase()),
-    /**
-     * Milestone 16: network reputation (VPN, proxy, Tor, data centre) for online interviews. "ipinfo"
-     * sends each respondent's address to IPinfo's privacy detection API (a paid IPinfo plan) when an
-     * interview starts and keeps only the answer's words; "off" sends nothing anywhere.
-     */
-    NETWORK_REPUTATION: z.enum(['off', 'ipinfo']).default('off'),
-    IPINFO_TOKEN: z.string().default(''),
+    /** Only for tests: an IPinfo-compatible stand-in. VPN and proxy checks are set up in Settings > Integrations. */
     IPINFO_API_BASE: z.string().url().default('https://ipinfo.io'),
     NETWORK_REPUTATION_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
-    /**
-     * Milestone 17: transcription of interview recordings. "deepgram" sends a recording to Deepgram when
-     * a reviewer asks for its transcript; "off" sends nothing. DEEPGRAM_MODEL names the Deepgram model
-     * to use (see Deepgram's model list); there is deliberately no default.
-     */
-    TRANSCRIPTION: z.enum(['off', 'deepgram']).default('off'),
-    DEEPGRAM_API_KEY: z.string().default(''),
-    DEEPGRAM_MODEL: z.string().max(100).default(''),
+    /** Only for tests: a Deepgram-compatible stand-in. Transcription is set up in Settings > Integrations. */
     DEEPGRAM_API_BASE: z.string().url().default('https://api.deepgram.com'),
     TRANSCRIPTION_TIMEOUT_S: z.coerce.number().int().min(10).max(3600).default(600),
-    /**
-     * Milestone 19: phone dialer for CATI. "twilio" places calls through Twilio's Programmable Voice
-     * API: the interviewer's phone rings first, then the respondent is dialled from TWILIO_CALLER_ID,
-     * so interviewers never see respondents' numbers. "off" leaves dialling to the interviewer.
-     * TELEPHONY_WEBHOOK_BASE is the public address of the API (ending in /api) that Twilio calls back.
-     */
-    TELEPHONY: z.enum(['off', 'twilio']).default('off'),
-    TWILIO_ACCOUNT_SID: z.string().default(''),
-    TWILIO_AUTH_TOKEN: z.string().default(''),
-    /** A Twilio number (or verified caller id) in E.164 form, e.g. +442071234567. */
-    TWILIO_CALLER_ID: z.string().default(''),
+    /** Only for tests: a Twilio-compatible stand-in. The phone dialer and SMS are set up in Settings > Integrations. */
     TWILIO_API_BASE: z.string().url().default('https://api.twilio.com'),
-    TELEPHONY_WEBHOOK_BASE: z.string().default(''),
     /** Seconds to let each phone ring before giving up. */
     TELEPHONY_RING_SECONDS: z.coerce.number().int().min(5).max(120).default(30),
-    /**
-     * Blueprint phase 3: email invitations and reminders. "sendgrid" sends through SendGrid's v3 Mail
-     * Send API from EMAIL_FROM; "off" sends nothing (personal links can still be downloaded and sent
-     * with another tool).
-     */
-    EMAIL_PROVIDER: z.enum(['off', 'sendgrid']).default('off'),
-    SENDGRID_API_KEY: z.string().default(''),
+    /** Only for tests: a SendGrid-compatible stand-in. Email is set up in Settings > Integrations. */
     SENDGRID_API_BASE: z.string().url().default('https://api.sendgrid.com'),
-    EMAIL_FROM: z.string().default(''),
-    EMAIL_FROM_NAME: z.string().max(100).default('SampCode surveys'),
     /**
-     * Blueprint phase 5: SMS invitations. "twilio" sends through Twilio's Messages API with the
-     * TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN above, from SMS_FROM (an E.164 number, or a Messaging
-     * Service SID starting MG). "off" sends nothing.
+     * Only for tests: a local SMTP stand-in such as smtp://127.0.0.1:2525 (plain, no TLS). When set it
+     * replaces the server, port and encryption saved for SMTP email; the sender and password still come
+     * from Settings > Integrations. Never set it in production.
      */
-    SMS_PROVIDER: z.enum(['off', 'twilio']).default('off'),
-    SMS_FROM: z.string().default(''),
+    SMTP_TEST_ENDPOINT: z
+      .string()
+      .regex(/^smtp:\/\/[^/\s:]+:[0-9]{1,5}$/, 'must look like smtp://127.0.0.1:2525')
+      .optional(),
     /**
      * Blueprint phase 5, data residency: the region this deployment keeps data in (e.g. "eu", "us",
      * "in"). An organization that sets its own region sees a warning when the two differ. Empty: not declared.
@@ -194,15 +127,7 @@ const schema = z
     PLATFORM_AUTOMATION_MS: z.coerce.number().int().min(5_000).max(3_600_000).default(60_000),
     /** Where the local file store keeps files (exports, uploads for AI jobs). */
     FILES_DIR: z.string().default('.data/files'),
-    /** Where file bytes live (Milestone 13): the local FILES_DIR, or a private S3 bucket. */
-    FILE_STORE: z.enum(['local', 's3']).default('local'),
-    S3_BUCKET: optionalString,
-    S3_REGION: z.string().default('eu-west-1'),
-    /** Key prefix inside the bucket, e.g. "zapx/production". */
-    S3_PREFIX: optionalString,
-    /** KMS key id or ARN for SSE-KMS. Without it objects use SSE-S3 (AES-256). */
-    S3_KMS_KEY_ID: optionalString,
-    /** S3-compatible endpoint for testing (MinIO, LocalStack). Leave unset on AWS. */
+    /** S3-compatible endpoint for testing (MinIO, LocalStack). Leave unset on AWS. S3 itself is set up in Settings > Integrations. */
     S3_ENDPOINT: optionalString,
     /** Export files are deleted after this many hours. */
     EXPORT_FILE_TTL_HOURS: z.coerce
@@ -216,31 +141,8 @@ const schema = z
     WEBHOOK_DELIVERY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     /** Plan for organizations created by sign-up (Milestone 8): free, team, business or enterprise. */
     DEFAULT_PLAN: z.enum(['free', 'team', 'business', 'enterprise']).default('enterprise'),
-    /** Billing (Milestone 13): off, or stripe (Checkout, customer portal and webhooks). */
-    BILLING: z.enum(['off', 'stripe']).default('off'),
-    STRIPE_SECRET_KEY: optionalString,
-    STRIPE_WEBHOOK_SECRET: optionalString,
-    /** Plan code to Stripe price ID, as JSON: {"team": "price_...", "business": "price_..."}. */
-    STRIPE_PRICES: z
-      .string()
-      .optional()
-      .transform((v, ctx) => {
-        if (!v) return {} as Partial<Record<'free' | 'team' | 'business' | 'enterprise', string>>;
-        try {
-          return z
-            .partialRecord(z.enum(['free', 'team', 'business', 'enterprise']), z.string().regex(/^price_[A-Za-z0-9]+$/))
-            .parse(JSON.parse(v)) as Partial<Record<'free' | 'team' | 'business' | 'enterprise', string>>;
-        } catch {
-          ctx.addIssue({ code: 'custom', message: 'STRIPE_PRICES must be JSON: {"team": "price_..."}' });
-          return z.NEVER;
-        }
-      }),
-    /** Pin the Stripe API version (e.g. 2026-09-30.clover); unset uses the account's default. */
-    STRIPE_API_VERSION: optionalString,
-    /** Only for tests: a Stripe-compatible fake. */
+    /** Only for tests: a Stripe-compatible fake. Billing is set up in Settings > Integrations. */
     STRIPE_API_BASE: z.string().url().default('https://api.stripe.com'),
-    /** Plan an organization falls back to when its subscription ends. */
-    BILLING_FALLBACK_PLAN: z.enum(['free', 'team', 'business', 'enterprise']).default('free'),
     /** Public address of the studio; SSO callbacks are ${STUDIO_URL}/api/auth/sso/callback. */
     STUDIO_URL: z.string().url().default('http://localhost:3000'),
     /** Oldest SampCode mobile app version allowed to sign in (e.g. 1.2.0); older apps are asked to update. */
@@ -255,21 +157,6 @@ const schema = z
       .transform((v) => v === 'true'),
     /** Load balancers and proxies in front of the API that add X-Forwarded-For (1 behind one ALB). */
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
-    /**
-     * Shared secret the CDN sends as X-Zapx-Edge (Milestone 13). When set, the viewer's address
-     * (EDGE_CLIENT_ADDRESS_HEADER) and country (GEO_COUNTRY_HEADER) are believed only on requests
-     * that carry it, and those headers are removed from every other request.
-     */
-    EDGE_SHARED_SECRET: z
-      .string()
-      .min(32)
-      .optional()
-      .or(z.literal('').transform(() => undefined)),
-    EDGE_CLIENT_ADDRESS_HEADER: z
-      .string()
-      .regex(/^[a-z0-9-]*$/i)
-      .default('')
-      .transform((v) => v.toLowerCase()),
     COOKIE_SECURE: z
       .string()
       .optional()
@@ -288,38 +175,6 @@ const schema = z
     PASSWORD_RESET_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   })
   .superRefine((c, ctx) => {
-    if (c.EMAIL_PROVIDER === 'sendgrid' && (!c.SENDGRID_API_KEY || !/^[^@\s]+@[^@\s]+$/.test(c.EMAIL_FROM)))
-      ctx.addIssue({
-        code: 'custom',
-        path: ['SENDGRID_API_KEY'],
-        message: 'EMAIL_PROVIDER=sendgrid needs SENDGRID_API_KEY and an EMAIL_FROM address',
-      });
-    if (c.TRANSCRIPTION === 'deepgram' && (!c.DEEPGRAM_API_KEY || !c.DEEPGRAM_MODEL))
-      ctx.addIssue({
-        code: 'custom',
-        path: ['DEEPGRAM_API_KEY'],
-        message: 'TRANSCRIPTION=deepgram needs DEEPGRAM_API_KEY and DEEPGRAM_MODEL',
-      });
-    if (c.TELEPHONY === 'twilio') {
-      for (const k of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_CALLER_ID', 'TELEPHONY_WEBHOOK_BASE'] as const)
-        if (!c[k]) ctx.addIssue({ code: 'custom', path: [k], message: `TELEPHONY=twilio needs ${k}` });
-      if (c.TWILIO_CALLER_ID && !/^\+[1-9][0-9]{6,14}$/.test(c.TWILIO_CALLER_ID))
-        ctx.addIssue({ code: 'custom', path: ['TWILIO_CALLER_ID'], message: 'TWILIO_CALLER_ID must be E.164, e.g. +442071234567' });
-      if (c.TELEPHONY_WEBHOOK_BASE && !/^https?:\/\/[^/]+(\/.*)?$/.test(c.TELEPHONY_WEBHOOK_BASE))
-        ctx.addIssue({ code: 'custom', path: ['TELEPHONY_WEBHOOK_BASE'], message: 'TELEPHONY_WEBHOOK_BASE must be a URL' });
-    }
-    if (c.SMS_PROVIDER === 'twilio') {
-      for (const k of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'SMS_FROM'] as const)
-        if (!c[k]) ctx.addIssue({ code: 'custom', path: [k], message: `SMS_PROVIDER=twilio needs ${k}` });
-      if (c.SMS_FROM && !/^(\+[1-9][0-9]{6,14}|MG[0-9a-fA-F]{32})$/.test(c.SMS_FROM))
-        ctx.addIssue({
-          code: 'custom',
-          path: ['SMS_FROM'],
-          message: 'SMS_FROM must be an E.164 number or a Messaging Service SID (MG...)',
-        });
-    }
-    if (c.NETWORK_REPUTATION === 'ipinfo' && !c.IPINFO_TOKEN)
-      ctx.addIssue({ code: 'custom', path: ['IPINFO_TOKEN'], message: 'IPINFO_TOKEN is required when NETWORK_REPUTATION=ipinfo' });
     // Milestone 20: refuse to start in production with settings that are only safe on a laptop.
     if (c.NODE_ENV === 'production') {
       if (!c.COOKIE_SECURE)
@@ -344,14 +199,9 @@ const schema = z
     if (c.NODE_ENV === 'production' && c.CALLBACK_ALLOW_PRIVATE_HOSTS) {
       ctx.addIssue({ code: 'custom', path: ['CALLBACK_ALLOW_PRIVATE_HOSTS'], message: 'must be false in production' });
     }
-    if (c.BILLING === 'stripe') {
-      for (const k of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const)
-        if (!c[k]) ctx.addIssue({ code: 'custom', path: [k], message: `BILLING=stripe needs ${k}` });
-      if (!Object.keys(c.STRIPE_PRICES).length)
-        ctx.addIssue({ code: 'custom', path: ['STRIPE_PRICES'], message: 'BILLING=stripe needs STRIPE_PRICES' });
+    if (c.NODE_ENV === 'production' && c.SMTP_TEST_ENDPOINT) {
+      ctx.addIssue({ code: 'custom', path: ['SMTP_TEST_ENDPOINT'], message: 'is only for tests; remove it in production' });
     }
-    if (c.FILE_STORE === 's3' && !c.S3_BUCKET)
-      ctx.addIssue({ code: 'custom', path: ['S3_BUCKET'], message: 'FILE_STORE=s3 needs S3_BUCKET' });
     if (c.NODE_ENV === 'production' && c.SSO_ALLOW_INSECURE_ISSUER) {
       ctx.addIssue({ code: 'custom', path: ['SSO_ALLOW_INSECURE_ISSUER'], message: 'must be false in production' });
     }

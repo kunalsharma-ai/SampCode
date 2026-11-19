@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '../http/errors';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
+import { config } from '../config';
 import type { Prisma } from '@zapx/db';
 import { type PrismaService } from '../common/prisma.service';
 import { type AuditService } from '../common/audit.service';
@@ -187,7 +188,8 @@ export class SuperAdminService {
     if (await this.prisma.user.findUnique({ where: { email: input.adminEmail } }))
       throw new ConflictException('An account with this email already exists');
     if (!this.catalog.exists(input.plan)) throw new BadRequestException('Unknown plan');
-    const passwordHash = await hash(input.adminPassword ?? randomBytes(24).toString('base64url'), 10);
+    const generated = !input.adminPassword && input.generatePassword ? generatePassword() : null;
+    const passwordHash = await hash(input.adminPassword ?? generated ?? randomBytes(24).toString('base64url'), 10);
     const { tenant, admin } = await this.prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: {
@@ -206,12 +208,36 @@ export class SuperAdminService {
     await this.record(actor, tenant.id, 'super.organization_created', 'tenant', tenant.id, { plan: tenant.plan, admin: admin.email });
     // Without a password the administrator chooses one from a setup link (a password reset link).
     let setup: { url: string; expiresAt: Date; emailed: boolean } | null = null;
-    if (!input.adminPassword) {
+    if (!input.adminPassword && !generated) {
       const link = await this.resets.create(admin, actor.id);
       const emailed = await this.resets.email({ email: admin.email, name: admin.name }, link.url, link.expiresAt, true);
       setup = { ...link, emailed };
     }
-    return { organization: tenant, admin: { id: admin.id, email: admin.email, name: admin.name }, setup };
+    return {
+      organization: tenant,
+      admin: { id: admin.id, email: admin.email, name: admin.name },
+      setup,
+      credentials: generated ? loginDetails(admin.email, generated) : null,
+    };
+  }
+
+  /**
+   * Client feedback 2026-11: new login details for a member, made by the super admin. The password is
+   * generated here, shown once and never stored in clear; it unlocks the account and signs the
+   * member out everywhere.
+   */
+  async generateCredentials(actor: AuthUser, id: string) {
+    const u = await this.prisma.user.findUnique({ where: { id } });
+    if (!u) throw new NotFoundException('Member not found');
+    if (u.disabledAt) throw new BadRequestException('Enable this member before giving them new login details');
+    const password = generatePassword();
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash: await hash(password, 10), failedLogins: 0, lockedUntil: null, sessionsRevokedAt: new Date() },
+    });
+    await this.prisma.passwordReset.updateMany({ where: { userId: id, usedAt: null }, data: { usedAt: new Date() } });
+    await this.record(actor, u.tenantId, 'super.member_credentials_generated', 'user', id, { email: u.email });
+    return loginDetails(u.email, password);
   }
 
   private async tenantOr404(id: string) {
@@ -382,15 +408,28 @@ export class SuperAdminService {
     if (await this.prisma.user.findUnique({ where: { email: input.email } }))
       throw new ConflictException('An account with this email already exists');
     await this.plans.assertSeat(tenantId, input.role);
+    const generated = input.generatePassword ? generatePassword() : null;
     const user = await this.prisma.user.create({
       data: {
         tenantId,
         email: input.email,
         name: input.name,
         role: input.role,
-        passwordHash: await hash(randomBytes(24).toString('base64url'), 10),
+        passwordHash: await hash(generated ?? randomBytes(24).toString('base64url'), 10),
       },
     });
+    if (generated) {
+      await this.record(actor, tenantId, 'super.member_created', 'user', user.id, {
+        email: user.email,
+        role: user.role,
+        credentials: true,
+      });
+      return {
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        setup: null,
+        credentials: loginDetails(user.email, generated),
+      };
+    }
     const link = await this.resets.create(user, actor.id);
     const emailed = await this.resets.email({ email: user.email, name: user.name }, link.url, link.expiresAt, true);
     await this.record(actor, tenantId, 'super.member_created', 'user', user.id, { email: user.email, role: user.role });
@@ -551,4 +590,20 @@ export class SuperAdminService {
       }),
     };
   }
+}
+
+/** A strong password people can read out and type: three groups of four, letters and digits without look-alikes. */
+export function generatePassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  for (;;) {
+    const bytes = randomBytes(12);
+    const chars = [...bytes].map((b) => alphabet[b % alphabet.length]!);
+    const pw = `${chars.slice(0, 4).join('')}-${chars.slice(4, 8).join('')}-${chars.slice(8).join('')}`;
+    // At least one capital, small letter and digit, so it passes any password rule.
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw) && /\d/.test(pw)) return pw;
+  }
+}
+
+function loginDetails(email: string, password: string) {
+  return { loginUrl: `${config().STUDIO_URL.replace(/\/$/, '')}/login`, email, password };
 }

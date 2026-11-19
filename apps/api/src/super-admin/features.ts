@@ -226,7 +226,8 @@ const RULES: RouteRule[] = [
   { pattern: /^glossary(\/|$)/, feature: 'translations' },
   { pattern: /^projects\/:id\/audit$/, feature: 'audit_log' },
   { pattern: /^projects\/:projectId\/vendors/, feature: 'integrations' },
-  { pattern: /^projects\/:id\/redirect-defaults/, feature: 'integrations' },
+  // Every project can set its own default redirect links (client feedback 2026-11): part of projects, not integrations.
+  { pattern: /^projects\/:id\/redirect-defaults/, feature: 'projects' },
   { pattern: /^projects\/:projectId\/surveys/, feature: rw('surveys.view', 'surveys.edit') },
   { pattern: /^projects(\/|$)/, feature: 'projects' },
   { pattern: /^surveys\/:id\/analysis\/assistant/, feature: 'ai_assist' },

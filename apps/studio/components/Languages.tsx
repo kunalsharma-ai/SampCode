@@ -5,7 +5,14 @@
  * enabled language to be complete and reviewed by a person.
  */
 import { useMemo, useState } from 'react';
-import { textKeys, translationQa, translationStatus, type TranslationIssue } from '@zapx/logic-engine';
+import {
+  applyTranslationSheet,
+  textKeys,
+  translationQa,
+  translationSheetCsv,
+  translationStatus,
+  type TranslationIssue,
+} from '@zapx/logic-engine';
 import { LANGUAGE_TAG, textDirection, type Language, type Presentation, type SurveyDefinition } from '@zapx/survey-schema';
 import { api } from '@/lib/api';
 import { ErrorNote } from './Shell';
@@ -14,6 +21,48 @@ import { useConfirm } from '@/components/neon/ConfirmDialog';
 import { InfoTip } from '@/components/neon/InfoTip';
 
 type RowState = 'missing' | 'outdated' | 'machine' | 'reviewed';
+
+/** Languages offered in the picker (any other BCP 47 tag can still be typed). */
+const COMMON_LANGUAGES: Array<[string, string]> = [
+  ['ar', 'العربية (Arabic)'],
+  ['bn', 'বাংলা (Bengali)'],
+  ['de', 'Deutsch (German)'],
+  ['en', 'English'],
+  ['es', 'Español (Spanish)'],
+  ['es-MX', 'Español de México'],
+  ['fr', 'Français (French)'],
+  ['gu', 'ગુજરાતી (Gujarati)'],
+  ['hi', 'हिन्दी (Hindi)'],
+  ['id', 'Bahasa Indonesia'],
+  ['it', 'Italiano (Italian)'],
+  ['ja', '日本語 (Japanese)'],
+  ['kn', 'ಕನ್ನಡ (Kannada)'],
+  ['ko', '한국어 (Korean)'],
+  ['ml', 'മലയാളം (Malayalam)'],
+  ['mr', 'मराठी (Marathi)'],
+  ['nl', 'Nederlands (Dutch)'],
+  ['pa', 'ਪੰਜਾਬੀ (Punjabi)'],
+  ['pl', 'Polski (Polish)'],
+  ['pt-BR', 'Português do Brasil'],
+  ['ru', 'Русский (Russian)'],
+  ['ta', 'தமிழ் (Tamil)'],
+  ['te', 'తెలుగు (Telugu)'],
+  ['th', 'ไทย (Thai)'],
+  ['tr', 'Türkçe (Turkish)'],
+  ['ur', 'اردو (Urdu)'],
+  ['vi', 'Tiếng Việt (Vietnamese)'],
+  ['zh-Hans', '简体中文 (Chinese, simplified)'],
+  ['zh-Hant', '繁體中文 (Chinese, traditional)'],
+];
+
+function download(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export function Languages({
   surveyId,
@@ -176,6 +225,24 @@ export function Languages({
         {!readOnly ? (
           <div className="stack" style={{ gap: 6 }}>
             <h3 style={{ margin: '8px 0 0' }}>Add a language</h3>
+            <select
+              aria-label="Choose a language"
+              value=""
+              onChange={(e) => {
+                const hit = COMMON_LANGUAGES.find(([t]) => t === e.target.value);
+                if (!hit) return;
+                setNewTag(hit[0]);
+                setNewName(hit[1].replace(/ \(.*\)$/, ''));
+              }}
+            >
+              <option value="">Choose a language…</option>
+              {COMMON_LANGUAGES.filter(([t]) => t !== def.language && !presentation.languages.some((l) => l.tag === t)).map(([t, n]) => (
+                <option key={t} value={t}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span className="muted small">or type a language code and name:</span>
             <div className="row" style={{ gap: 6 }}>
               <input
                 aria-label="Language tag"
@@ -305,9 +372,58 @@ export function Languages({
                     Save first: AI and the memory work on the saved draft.
                   </span>
                 ) : null}
-                {!aiConfigured ? <span className="muted small">AI is not configured; translate by hand below.</span> : null}
+                {!aiConfigured ? (
+                  <span className="muted small">
+                    Auto translate needs Claude, which is not connected on this server yet (a super admin adds the key in Super admin ›
+                    Integrations). Meanwhile translate by hand below or with the translation sheet.
+                  </span>
+                ) : null}
               </div>
             ) : null}
+            <div className="row translation-sheet" data-testid="translation-sheet">
+              <button
+                type="button"
+                onClick={() =>
+                  download(
+                    `${def.title.replace(/[^\w-]+/g, '-').slice(0, 40) || 'survey'}-${lang.tag}-translation.csv`,
+                    translationSheetCsv(def, presentation, lang.tag),
+                  )
+                }
+              >
+                Download translation sheet
+              </button>
+              {!readOnly ? (
+                <label className="btn">
+                  Upload translated sheet
+                  <input
+                    type="file"
+                    accept=".csv,text/csv,text/plain"
+                    hidden
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      setError(null);
+                      try {
+                        const r = applyTranslationSheet(def, presentation, lang.tag, await file.text());
+                        onChange(r.presentation);
+                        setNotice(
+                          `${r.applied} text(s) updated from ${file.name}.${r.empty ? ` ${r.empty} left empty.` : ''}${
+                            r.unknown.length ? ` ${r.unknown.length} row(s) not in this survey any more were skipped.` : ''
+                          } Save the draft to keep them.`,
+                        );
+                      } catch (err) {
+                        setError(err);
+                      }
+                    }}
+                  />
+                </label>
+              ) : null}
+              <span className="muted small">
+                A spreadsheet (CSV, opens in Excel) with each question text and answer option: the existing text on the left, an empty
+                Translation column on the right. Fill it in and upload it back.
+              </span>
+            </div>
             <div className="row">
               <label className="check">
                 <input type="radio" name="lang-filter" checked={filter === 'attention'} onChange={() => setFilter('attention')} /> Needs

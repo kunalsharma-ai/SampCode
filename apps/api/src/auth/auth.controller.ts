@@ -6,7 +6,6 @@ import { compare, hash, hashSync } from 'bcryptjs';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
-import { integration } from '../platform/integrations';
 import { type PrismaService } from '../common/prisma.service';
 import { type AuditService } from '../common/audit.service';
 import { parseBody } from '../common/validation';
@@ -18,6 +17,7 @@ import { type SsoService } from './sso.service';
 import { type PasswordResetService, newPasswordSchema } from './password-reset.service';
 import { type EntitlementsService } from '../super-admin/entitlements.service';
 import { type IntegrationSettingsService } from '../platform/integration-settings.service';
+import { emailService } from '../distribution/mailer';
 import { ALL_ROLES } from './decorators';
 
 const loginSchema = z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1).max(200) });
@@ -187,7 +187,7 @@ export class AuthController {
   }
 
   /**
-   * Forgot password: emails a one-time link when email is set up (EMAIL_PROVIDER). Always answers
+   * Forgot password: emails a one-time link when email is set up (Settings > Integrations > SendGrid). Always answers
    * 204, whether or not the account exists, so the form cannot be used to find accounts.
    */
   async forgot(body: unknown) {
@@ -203,7 +203,7 @@ export class AuthController {
 
   /** Whether "forgot password" can send email, so the sign-in page can say what will happen. */
   passwordOptions() {
-    return { forgotPasswordEmail: integration('sendgrid').enabled };
+    return { forgotPasswordEmail: emailService() !== null };
   }
 
   /** Sets a new password from a reset link. Signs out every session; the member then signs in. */

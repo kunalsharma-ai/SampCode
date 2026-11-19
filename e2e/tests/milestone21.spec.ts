@@ -1,7 +1,7 @@
 /**
  * Integrations in the CRM, through the real UI: the administrator of the organization that runs the
  * installation pastes an IPinfo token (kept off, so other specs are not affected), sees only its last
- * characters afterwards, tests a connection, and hands the integration back to the server settings.
+ * characters afterwards, tests a connection, and forgets the saved settings again.
  * An administrator of a customer organization has no Integrations page.
  */
 import { execFileSync } from 'node:child_process';
@@ -36,12 +36,12 @@ test('integrations are set up in the CRM by the operator only', async ({ page, b
   const out = execFileSync('node', [cli, `operator@${run}.e2e.test`]).toString();
   previous = /previous=(.*)/.exec(out)?.[1]?.trim() ?? '';
 
-  // Start from the server settings, whatever an earlier run left behind.
+  // Start from nothing saved for IPinfo, whatever an earlier run left behind.
   await page.request.delete('/api/platform/integrations/ipinfo', { headers: { 'x-zapx-csrf': '1' } });
   await page.goto('/settings');
   await page.getByTestId('integrations-link').click();
   await expect(page.getByRole('heading', { name: 'Integrations' })).toBeVisible();
-  for (const key of ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'stripe', 's3'])
+  for (const key of ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'smtp', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'])
     await expect(page.getByTestId(`integration-${key}`)).toBeVisible();
 
   const ipinfo = page.getByTestId('integration-ipinfo');
@@ -56,21 +56,21 @@ test('integrations are set up in the CRM by the operator only', async ({ page, b
   await expect(ipinfo.getByText('…1234')).toBeVisible();
   await expect(page.getByText('e2e-ipinfo-token-abcd1234')).toHaveCount(0);
 
-  // Deepgram runs from the server environment in this test run; its stand-in is not listening now.
+  // Deepgram was saved for this run (global-setup.ts); its stand-in is not listening now.
   const deepgram = page.getByTestId('integration-deepgram');
-  await expect(deepgram.getByText('Running from the server environment. Saving here takes over from it.')).toBeVisible();
   await expect(deepgram.getByTestId('integration-status')).toHaveText('On');
+  await expect(deepgram.getByText('saved here').first()).toBeVisible();
   await deepgram.getByRole('button', { name: 'Test connection' }).click();
   await expect(deepgram.getByTestId('integration-test-result')).toContainText('✗');
 
   await expect(page.getByTestId('integrations-elsewhere')).toContainText('Single sign-on');
-  await expect(page.getByTestId('integrations-developer')).toContainText('SECRETS_KEY');
+  await expect(page.getByTestId('integrations-developer')).toContainText('None of them is an API key');
 
   await page.goto('/settings/audit');
   await expect(page.locator('td', { hasText: 'platform.integration_saved' }).first()).toBeVisible();
 
   await page.goto('/settings/integrations');
-  await page.getByTestId('integration-ipinfo').getByRole('button', { name: 'Use server settings instead' }).click();
+  await page.getByTestId('integration-ipinfo').getByRole('button', { name: 'Forget saved settings' }).click();
   await expect(page.getByTestId('integration-ipinfo').getByTestId('integration-status')).toHaveText('Not set up');
 
   // A customer organization's administrator cannot see or change them.

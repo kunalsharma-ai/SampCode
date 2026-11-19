@@ -170,6 +170,10 @@ export class SuperAdminController {
     return this.svc.userResetLink(user, id);
   }
 
+  credentials(user: AuthUser, id: string) {
+    return this.svc.generateCredentials(user, id);
+  }
+
   // Activity and integrations
   activity(query: unknown) {
     return this.svc.activity(parseBody(activitySchema, query));
@@ -332,6 +336,12 @@ export function superAdminControllerRoutes(r: Router, c: SuperAdminController, k
     '/api/super/users/:id',
     ...kit.route({ controller: 'SuperAdminController', handler: 'updateUser', method: 'patch' }, (req) =>
       c.updateUser(req.user as AuthUser, req.params.id, req.body),
+    ),
+  );
+  r.post(
+    '/api/super/users/:id/credentials',
+    ...kit.route({ controller: 'SuperAdminController', handler: 'credentials', method: 'post' }, (req) =>
+      c.credentials(req.user as AuthUser, req.params.id),
     ),
   );
   r.post(

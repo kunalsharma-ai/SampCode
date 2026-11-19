@@ -123,7 +123,7 @@ const entries = {
   },
   'page.integrations': {
     title: 'Integrations',
-    what: 'Connections to outside services that power features: Claude (AI), IPinfo (fraud checks), Deepgram (transcription), Twilio (calls and SMS), Stripe (billing) and S3 (file storage).',
+    what: 'Connections to outside services that power features: Claude (AI), IPinfo (fraud checks), Deepgram (transcription), Twilio (calls and SMS), SMTP email such as Zoho Mail or SendGrid (email), Stripe (billing), S3 (file storage), SampAudience (audiences) and an optional CDN. Every API key lives here, encrypted in the database, not in server files.',
     how: [
       'Open a service, paste its key and click "Test connection".',
       'Save; the feature that needs it switches on for everyone in the organization.',
@@ -772,8 +772,8 @@ const entries = {
   },
   'section.integrationServer': {
     title: 'Still set on the server',
-    what: 'Services configured by your SampCode operator for the whole installation.',
-    how: ['Nothing to do here; ask your operator to change them.'],
+    what: 'Only the database connection and the web addresses stay in the server settings file. No API key is kept there.',
+    how: ['Nothing to do here; whoever installed SampCode set them once.'],
     where: 'For information only.',
   },
   'section.integration': {
@@ -1119,3 +1119,18 @@ export const HELP: Record<HelpKey, HelpEntry> = entries;
 
 /** Help key for a question type (every type in the survey schema has one). */
 export const qtypeHelp = (type: string): HelpKey => (`qtype.${type}` in entries ? (`qtype.${type}` as HelpKey) : 'section.question');
+
+/**
+ * Info box for a question created from the question library: the library's description first, then
+ * how to use the underlying question type, and the library's note (what to set up) as the tip.
+ */
+export function catalogHelp(type: { no: number; name: string; description: string; note?: string }, baseType: string): HelpEntry {
+  const base = HELP[qtypeHelp(baseType)];
+  return {
+    title: `${type.no}. ${type.name}`,
+    what: `${type.description}.`,
+    how: base.how,
+    where: base.where,
+    tip: type.note ?? base.tip,
+  };
+}

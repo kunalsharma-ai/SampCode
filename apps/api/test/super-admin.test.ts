@@ -154,6 +154,44 @@ describe('registering organizations', () => {
       .send({ organization: 'Dup', adminName: 'Ada', adminEmail: `ada-${run}@test.zapx`, plan: 'team' })
       .expect(409);
   });
+
+  it('generates login details for a new client ID and its members, and new ones on request', async () => {
+    const r = await http
+      .post('/api/super/organizations')
+      .set(superAdmin)
+      .send({ organization: `Creds ${run}`, adminName: 'Cy', adminEmail: `cy-${run}@test.zapx`, plan: 'team', generatePassword: true })
+      .expect(201);
+    expect(r.body.setup).toBeNull();
+    expect(r.body.credentials).toMatchObject({ email: `cy-${run}@test.zapx`, loginUrl: expect.stringMatching(/\/login$/) });
+    const password = r.body.credentials.password as string;
+    expect(password).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
+    await http
+      .post('/api/auth/login')
+      .send({ email: `cy-${run}@test.zapx`, password })
+      .expect(200);
+
+    const m = await http
+      .post(`/api/super/organizations/${r.body.organization.id}/members`)
+      .set(superAdmin)
+      .send({ name: 'Mo', email: `mo-${run}@test.zapx`, role: 'PROGRAMMER', generatePassword: true })
+      .expect(201);
+    await http
+      .post('/api/auth/login')
+      .send({ email: `mo-${run}@test.zapx`, password: m.body.credentials.password })
+      .expect(200);
+
+    const again = await http.post(`/api/super/users/${m.body.user.id}/credentials`).set(superAdmin).expect(201);
+    expect(again.body.password).not.toBe(m.body.credentials.password);
+    await http
+      .post('/api/auth/login')
+      .send({ email: `mo-${run}@test.zapx`, password: m.body.credentials.password })
+      .expect(401);
+    await http
+      .post('/api/auth/login')
+      .send({ email: `mo-${run}@test.zapx`, password: again.body.password })
+      .expect(200);
+    await http.post(`/api/super/users/${m.body.user.id}/credentials`).set(admin).expect(403);
+  });
 });
 
 describe('features follow the plan, the organization and the member', () => {

@@ -55,12 +55,12 @@ export interface S3Settings {
   secretAccessKey?: string;
 }
 
-/** The S3 settings in use: Settings > Integrations first, then the S3_* variables. */
+/** The S3 settings in use (Settings > Integrations). */
 export function s3Settings(): S3Settings {
   const v = integration('s3').values;
   return {
     bucket: v.bucket ?? '',
-    region: v.region || config().S3_REGION,
+    region: v.region ?? '',
     prefix: v.prefix || undefined,
     kmsKeyId: v.kmsKeyId || undefined,
     accessKeyId: v.accessKeyId || undefined,
@@ -75,7 +75,7 @@ export class S3FileStore extends FileStore {
   private readonly kmsKeyId: string | undefined;
   constructor(client?: S3Client, settings: S3Settings = s3Settings()) {
     super();
-    if (!settings.bucket) throw new Error('S3 storage needs a bucket (Settings > Integrations, or S3_BUCKET)');
+    if (!settings.bucket) throw new Error('S3 storage needs a bucket (Settings > Integrations)');
     this.client = client ?? S3FileStore.client(settings);
     this.bucket = settings.bucket;
     this.prefix = settings.prefix ? `${settings.prefix.replace(/\/+$/, '')}/` : '';
@@ -127,7 +127,7 @@ export class S3FileStore extends FileStore {
   }
 }
 
-/** The store in use right now: S3 when it is on in Settings > Integrations (or FILE_STORE=s3), else local. */
+/** The store in use right now: S3 when it is on in Settings > Integrations, else local. */
 export function fileStoreFromConfig(): FileStore {
   return integration('s3').enabled ? new S3FileStore() : new LocalFileStore();
 }

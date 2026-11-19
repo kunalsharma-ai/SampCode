@@ -82,9 +82,7 @@ jobs:
       - name: Generate production-grade settings
         run: |
           {
-            echo "JWT_SECRET=$(openssl rand -hex 32)"
             echo "SECRETS_KEY=$(openssl rand -hex 32)"
-            echo "SIGNING_KEYS_SECRET=$(openssl rand -hex 32)"
             echo "COOKIE_SECURE=true"
           } > .env
       - run: docker compose build
