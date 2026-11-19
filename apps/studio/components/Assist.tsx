@@ -5,6 +5,8 @@ import { api, upload, waitForJob, type Job } from '@/lib/api';
 import { JobProgress } from './ExportJobs';
 import { ErrorNote } from './Shell';
 import { InfoTip } from '@/components/neon/InfoTip';
+import Link from 'next/link';
+import { useMe } from '@/lib/useMe';
 
 interface ChangeSetSummary {
   id: string;
@@ -88,7 +90,8 @@ export function Assist({
   /** Scroll to the questionnaire import (from the dashboard's "Import a questionnaire"). */
   focusImport?: boolean;
 }) {
-  const [ai, setAi] = useState<{ configured: boolean; model: string } | null>(null);
+  const me = useMe();
+  const [ai, setAi] = useState<{ configured: boolean; model: string; setup?: string | null } | null>(null);
   const [instruction, setInstruction] = useState(initialInstruction);
   const importPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -114,7 +117,7 @@ export function Assist({
     }
   }, [surveyId]);
   useEffect(() => {
-    void api<{ configured: boolean; model: string }>('/ai/status').then(setAi, setError);
+    void api<{ configured: boolean; model: string; setup?: string | null }>('/ai/status').then(setAi, setError);
     void loadList();
   }, [loadList]);
   useEffect(() => () => recognizer.current?.stop(), []);
@@ -242,8 +245,13 @@ export function Assist({
               </h2>
               {ai && !ai.configured ? (
                 <p className="small" style={{ color: 'var(--warn)' }} data-testid="ai-not-configured">
-                  Claude is not connected yet. An administrator can connect it in Settings › Integrations. File import below works without
-                  it.
+                  Claude is not connected yet. {ai.setup ?? 'A super admin connects it in Super admin › Integrations.'}{' '}
+                  {me?.superAdmin ? (
+                    <Link href="/super-admin/integrations">Set up Claude now</Link>
+                  ) : me?.canManageIntegrations ? (
+                    <Link href="/settings/integrations">Set up Claude now</Link>
+                  ) : null}{' '}
+                  File import below works without it.
                 </p>
               ) : (
                 <p className="muted small">

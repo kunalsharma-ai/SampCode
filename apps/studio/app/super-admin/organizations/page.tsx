@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { CopyField, ErrorNote } from '@/components/Shell';
 import { SuperAdminFrame, StatusBadge, ago, fmtDate, type PlanRow } from '@/components/super-admin/SuperAdminFrame';
 import { InfoTip } from '@/components/neon/InfoTip';
+import { CredentialsCard, CredentialsChoice, type LoginCredentials } from '@/components/super-admin/Credentials';
 
 interface OrgRow {
   id: string;
@@ -28,6 +29,7 @@ interface Created {
   organization: { id: string; name: string };
   admin: { email: string };
   setup: { url: string; expiresAt: string; emailed: boolean } | null;
+  credentials?: LoginCredentials | null;
 }
 
 const FILTERS = [
@@ -50,6 +52,7 @@ function RegisterForm({ plans, onDone }: { plans: PlanRow[]; onDone: (c: Created
     notes: '',
   });
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'generate' | 'link'>('generate');
   const [error, setError] = useState<unknown>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const plan = f.plan || plans.find((p) => p.active)?.code || '';
@@ -68,6 +71,7 @@ function RegisterForm({ plans, onDone }: { plans: PlanRow[]; onDone: (c: Created
           subscriptionStatus: f.subscriptionStatus,
           subscriptionEndsAt: f.endsAt ? new Date(`${f.endsAt}T23:59:59`).toISOString() : null,
           notes: f.notes || undefined,
+          generatePassword: mode === 'generate',
         },
       });
       onDone(created);
@@ -86,8 +90,8 @@ function RegisterForm({ plans, onDone }: { plans: PlanRow[]; onDone: (c: Created
         <InfoTip k="sa.register" />
       </h2>
       <p className="muted small" style={{ margin: 0 }}>
-        Creates the organization and its first administrator. The administrator gets a link to choose a password (emailed when email sending
-        is set up; you can also copy it).
+        Creates the organization (the client ID) and its first administrator, with login details you send them, or a link to choose a
+        password.
       </p>
       <div className="sa-form">
         <label className="field">
@@ -129,6 +133,7 @@ function RegisterForm({ plans, onDone }: { plans: PlanRow[]; onDone: (c: Created
           <input value={f.notes} onChange={set('notes')} />
         </label>
       </div>
+      <CredentialsChoice value={mode} onChange={setMode} />
       <ErrorNote error={error} />
       <div className="row">
         <button className="primary" disabled={busy} data-testid="register-org-submit">
@@ -179,6 +184,7 @@ export default function OrganizationsPage() {
           <strong>
             {created.organization.name} is registered. Its administrator is {created.admin.email}.
           </strong>
+          {created.credentials ? <CredentialsCard credentials={created.credentials} who={created.admin.email} /> : null}
           {created.setup ? (
             <>
               <span className="small muted">

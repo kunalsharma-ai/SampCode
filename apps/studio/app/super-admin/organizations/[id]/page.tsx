@@ -13,6 +13,8 @@ import { SuperAdminFrame, StatusBadge, ago, fmtDate, type PlanRow } from '@/comp
 import { FeatureMatrix, SURFACES, type FeatureDef, type Surface } from '@/components/super-admin/FeatureMatrix';
 import { ActivityFeed, type ActivityEvent } from '@/components/super-admin/ActivityFeed';
 import { InfoTip } from '@/components/neon/InfoTip';
+import { CredentialsCard, CredentialsChoice, type LoginCredentials } from '@/components/super-admin/Credentials';
+import { useConfirm } from '@/components/neon/ConfirmDialog';
 
 type Overrides = Partial<Record<Surface, Record<string, boolean>>>;
 
@@ -266,10 +268,12 @@ function OrgFeatures({ d, features, onSaved }: { d: Detail; features: FeatureDef
 }
 
 function MemberRow({ m, d, features, onSaved }: { m: Member; d: Detail; features: FeatureDef[]; onSaved: () => void }) {
+  const confirm = useConfirm();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Overrides>(m.featureOverrides);
   const [error, setError] = useState<unknown>(null);
   const [link, setLink] = useState<{ url: string; emailed: boolean } | null>(null);
+  const [creds, setCreds] = useState<LoginCredentials | null>(null);
   const patch = (body: Record<string, unknown>) => api(`/super/users/${m.id}`, { method: 'PATCH', body }).then(onSaved, setError);
   const removed = SURFACES.reduce((n, s) => n + Object.keys(m.featureOverrides[s] ?? {}).length, 0);
   return (
@@ -329,13 +333,33 @@ function MemberRow({ m, d, features, onSaved }: { m: Member; d: Detail; features
                 Reset link
               </button>
             ) : null}
+            {!m.disabledAt ? (
+              <button
+                className="small"
+                data-testid={`generate-credentials-${m.email}`}
+                onClick={async () => {
+                  if (
+                    !(await confirm({
+                      title: `New login details for ${m.name}?`,
+                      message: 'A new password is made. Their current password stops working and they are signed out everywhere.',
+                      confirmLabel: 'Generate',
+                    }))
+                  )
+                    return;
+                  void api<LoginCredentials>(`/super/users/${m.id}/credentials`, { method: 'POST' }).then(setCreds, setError);
+                }}
+              >
+                Generate login details
+              </button>
+            ) : null}
           </div>
         </td>
       </tr>
-      {error || link ? (
+      {error || link || creds ? (
         <tr>
           <td colSpan={6}>
             <ErrorNote error={error} />
+            {creds ? <CredentialsCard credentials={creds} who={m.name} /> : null}
             {link ? (
               <div className="stack" style={{ gap: 4 }}>
                 <span className="small muted">{link.emailed ? 'Emailed to the member.' : 'Send this link to the member:'}</span>
@@ -396,12 +420,18 @@ function AddMember({ orgId, onSaved }: { orgId: string; onSaved: () => void }) {
   const [f, setF] = useState({ name: '', email: '', role: 'PROGRAMMER' });
   const [error, setError] = useState<unknown>(null);
   const [link, setLink] = useState<{ url: string; emailed: boolean } | null>(null);
+  const [mode, setMode] = useState<'generate' | 'link'>('generate');
+  const [created, setCreated] = useState<LoginCredentials | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
-      const r = await api<{ setup: { url: string; emailed: boolean } }>(`/super/organizations/${orgId}/members`, { body: f });
+      const r = await api<{ setup: { url: string; emailed: boolean } | null; credentials?: LoginCredentials | null }>(
+        `/super/organizations/${orgId}/members`,
+        { body: { ...f, generatePassword: mode === 'generate' } },
+      );
       setLink(r.setup);
+      setCreated(r.credentials ?? null);
       setF({ name: '', email: '', role: 'PROGRAMMER' });
       onSaved();
     } catch (err) {
@@ -430,7 +460,9 @@ function AddMember({ orgId, onSaved }: { orgId: string; onSaved: () => void }) {
         </label>
         <button className="primary">Add member</button>
       </div>
+      <CredentialsChoice value={mode} onChange={setMode} />
       <ErrorNote error={error} />
+      {created ? <CredentialsCard credentials={created} /> : null}
       {link ? (
         <div className="stack" style={{ gap: 4 }}>
           <span className="small muted">{link.emailed ? 'The setup link was emailed.' : 'Send this setup link to the new member:'}</span>

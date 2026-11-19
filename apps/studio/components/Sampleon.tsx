@@ -80,8 +80,8 @@ export function Sampleon({
       <section className="panel stack">
         <SampAudienceTitle />
         <p className="muted small">
-          SampAudience is not connected. An administrator sets SAMPLEON_URL, SAMPLEON_CLIENT_SECRET and SAMPLEON_OUTCOME_SECRET for the API,
-          and registers SampCode as a survey host in SampAudience.
+          SampAudience is not connected. An administrator sets it up in Settings › Integrations › SampAudience (address, client secret and
+          outcome secret) and registers SampCode as a survey host in SampAudience.
         </p>
       </section>
     );

@@ -15,11 +15,23 @@ import { type AuditService } from '../common/audit.service';
 import { type PrismaService } from '../common/prisma.service';
 import { parseBody } from '../common/validation';
 import { config } from '../config';
+import { integration } from '../platform/integrations';
 import { type SecretBox } from '../platform/secret-box';
 import { type SurveysService } from '../surveys/surveys.service';
 
 /** The vendor code SAMPLEON respondents enter with. Reserved per project. */
 export const SAMPLEON_VENDOR_CODE = 'SAMPLEON';
+
+/** SampAudience's address and SampCode's credentials there, from Settings > Integrations (ADR 0043). */
+function sampleon() {
+  const v = integration('sampleon').values;
+  return {
+    url: (v.url ?? '').replace(/\/+$/, ''),
+    clientId: v.clientId || 'zapx',
+    clientSecret: v.clientSecret ?? '',
+    outcomeSecret: v.outcomeSecret ?? '',
+  };
+}
 
 const Country = z.string().regex(/^[A-Z]{2}$/, 'Use ISO 3166-1 alpha-2, e.g. US');
 const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -91,8 +103,7 @@ export class SampleonService {
   ) {}
 
   static configured() {
-    const c = config();
-    return !!(c.SAMPLEON_URL && c.SAMPLEON_CLIENT_SECRET);
+    return integration('sampleon').enabled;
   }
 
   /** Where SAMPLEON sends respondents. SAMPLEON replaces {token} with its session token. */
@@ -114,7 +125,6 @@ export class SampleonService {
    * SAMPLEON as a redirect plus a signed S2S confirmation (redirect-core sampleonAdapter).
    */
   async ensureVendor(user: AuthUser, projectId: string) {
-    const c = config();
     const existing = await this.prisma.vendor.findFirst({ where: { projectId, code: SAMPLEON_VENDOR_CODE, tenantId: user.tenantId } });
     if (existing) {
       if (existing.deletedAt)
@@ -123,7 +133,9 @@ export class SampleonService {
         throw new ConflictException(`Vendor code ${SAMPLEON_VENDOR_CODE} is already used by another vendor in this project`);
       return existing;
     }
-    if (!c.SAMPLEON_OUTCOME_SECRET) throw new ServiceUnavailableException('SAMPLEON_OUTCOME_SECRET is not set');
+    const sa = sampleon();
+    if (!SampleonService.configured() || !sa.outcomeSecret)
+      throw new ServiceUnavailableException('SampAudience is not set up (Settings > Integrations)');
     const vendor = await this.prisma.vendor.create({
       data: {
         tenantId: user.tenantId,
@@ -131,8 +143,8 @@ export class SampleonService {
         name: 'SampAudience',
         code: SAMPLEON_VENDOR_CODE,
         integration: 'SAMPLEON',
-        partnerBaseUrl: c.SAMPLEON_URL!.replace(/\/+$/, ''),
-        partnerSecretEnc: this.box.seal(c.SAMPLEON_OUTCOME_SECRET),
+        partnerBaseUrl: sa.url,
+        partnerSecretEnc: this.box.seal(sa.outcomeSecret),
         partnerS2s: true,
         secret: randomBytes(32).toString('hex'),
       },
@@ -168,7 +180,7 @@ export class SampleonService {
       loiMinutes: input.loiMinutes,
       reward: input.reward,
       fieldwork: input.fieldwork,
-      survey: { launchUrl: SampleonService.launchUrl(survey.id), language: input.language, hostId: config().SAMPLEON_CLIENT_ID },
+      survey: { launchUrl: SampleonService.launchUrl(survey.id), language: input.language, hostId: sampleon().clientId },
       redirects: { allowRouting: input.allowRouting },
       ...(input.exclusions ? { exclusions: input.exclusions } : {}),
     };
@@ -196,18 +208,18 @@ export class SampleonService {
 
   /** Signed call to SAMPLEON. SAMPLEON's 4xx answers are passed on; anything else is a 502. */
   private async call(method: 'GET' | 'POST', path: string, body: unknown, idempotencyKey?: string): Promise<unknown> {
-    const c = config();
+    const sa = sampleon();
     const text = body === undefined ? '' : JSON.stringify(body);
     let res: Response;
     try {
-      res = await fetch(`${c.SAMPLEON_URL!.replace(/\/+$/, '')}${path}`, {
+      res = await fetch(`${sa.url}${path}`, {
         method,
         redirect: 'manual',
         signal: AbortSignal.timeout(15_000),
         headers: {
           ...(text ? { 'content-type': 'application/json' } : {}),
           ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-          ...sampledgeServiceHeaders({ clientId: c.SAMPLEON_CLIENT_ID, secret: c.SAMPLEON_CLIENT_SECRET!, method, path, body: text }),
+          ...sampledgeServiceHeaders({ clientId: sa.clientId, secret: sa.clientSecret, method, path, body: text }),
         },
         body: text || undefined,
       });
@@ -229,7 +241,6 @@ export class SampleonService {
 
   /** Signed SAMPLEON event webhook. Each event is applied once; unknown requests are acknowledged. */
   async receive(req: InboundRequest) {
-    const c = config();
     if (!SampleonService.configured()) throw new ServiceUnavailableException('The SampAudience integration is not configured');
     const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? null));
     const reason = verifySampledgeRequest({
@@ -238,7 +249,7 @@ export class SampleonService {
       path: req.originalUrl,
       body: raw,
       expectedClient: 'sampleon',
-      secret: c.SAMPLEON_CLIENT_SECRET!,
+      secret: sampleon().clientSecret,
     });
     if (reason) throw new UnauthorizedException(reason);
     const parsed = envelopeSchema.safeParse(req.body);

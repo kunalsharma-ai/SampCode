@@ -58,6 +58,17 @@ enum ProjectScope {
   ASSIGNED
 }
 
+/// Where a project is in its life (client feedback 2026-11). Running, paused and completed follow the
+/// surveys' field status automatically; draft, under approval and approved are set by the team.
+enum ProjectStatus {
+  DRAFT
+  UNDER_APPROVAL
+  APPROVED
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
 enum SurveyStatus {
   DRAFT
   LIVE
@@ -278,6 +289,8 @@ model Project {
   client           String?
   /// Project-level redirect defaults: {urls, words, countries}. Vendors override these.
   redirectDefaults Json            @default("{}")
+  /// Status the team set (see ProjectStatus); empty = worked out from the surveys.
+  status           ProjectStatus?
   createdAt        DateTime        @default(now())
   /// Soft delete: hidden everywhere, kept for audit and data retention.
   deletedAt        DateTime?
@@ -519,6 +532,15 @@ model PlatformIntegration {
   secretsSealed String?
   updatedById   String?
   updatedAt     DateTime @updatedAt
+}
+
+/// Secrets SampCode makes for itself on the first start (ADR 0043), so nobody has to generate them:
+/// one row, id "installation". `sealed` is a JSON object {"JWT_SECRET": "...", "SIGNING_KEYS_SECRET": "..."}
+/// sealed with SecretBox (SECRETS_KEY). An environment variable of the same name still wins.
+model InstallationSecret {
+  id        String   @id @map("_id")
+  sealed    String
+  createdAt DateTime @default(now())
 }
 
 model AuditEvent {
