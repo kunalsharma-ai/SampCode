@@ -49,8 +49,10 @@ test('program, publish, respond, redirect, export', async ({ page, context }) =>
 
   // --- Vendor from the Sampledge preset ---
   await page.getByRole('button', { name: '+ Sampledge preset' }).click();
-  await expect(page.getByLabel('Quota full URL')).toHaveValue('https://platform.sampledge.com/response/status?status=[STATUS]&uid=[UID]');
-  await expect(page.getByLabel('Quota full status word')).toHaveValue('overquota');
+  await expect(page.getByTestId('vendor-editor').getByLabel('Quota full URL')).toHaveValue(
+    'https://platform.sampledge.com/response/status?status=[STATUS]&uid=[UID]',
+  );
+  await expect(page.getByTestId('vendor-editor').getByLabel('Quota full status word')).toHaveValue('overquota');
   await page.getByRole('button', { name: 'Save vendor' }).click();
   await expect(page.getByText('vid=SE')).toBeVisible();
 

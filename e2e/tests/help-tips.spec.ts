@@ -45,8 +45,8 @@ test('help cards explain pages, sections, tabs and question types', async ({ pag
   await expect(page.getByRole('dialog', { name: 'Build' })).toContainText('visual questionnaire builder');
   await page.keyboard.press('Escape');
 
-  // Question types: the card follows the type chosen for the next question.
-  await page.getByLabel('New question type').selectOption('maxdiff');
-  await page.locator('[data-help="qtype.maxdiff"]').click();
-  await expect(page.getByRole('dialog', { name: 'MaxDiff (best-worst)' })).toContainText('best and the worst');
+  // Question types: the card follows the library type chosen for the next question.
+  await page.getByLabel('New question type').selectOption('lib:maxdiff');
+  await page.getByRole('button', { name: 'Help', description: 'About 31. Best-Worst Scaling (MaxDiff)' }).click();
+  await expect(page.getByRole('dialog', { name: '31. Best-Worst Scaling (MaxDiff)' })).toContainText('Select best and worst options');
 });

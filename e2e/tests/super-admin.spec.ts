@@ -48,7 +48,7 @@ test('the super admin controls an organization’s features live', async ({ page
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
   await expect(page.getByTestId('kpi-orgs')).toBeVisible();
 
-  // Register a new organization: its administrator gets a setup link.
+  // Register a new organization (client ID): the super admin gets login details to send, and they work.
   await page.goto('/super-admin/organizations');
   await page.getByTestId('show-register').click();
   await page.getByTestId('org-name-input').fill(`Registered ${run}`);
@@ -56,6 +56,21 @@ test('the super admin controls an organization’s features live', async ({ page
   await page.getByTestId('admin-email-input').fill(`new@${run}.e2e.test`);
   await page.getByTestId('register-org-submit').click();
   await expect(page.getByTestId('org-created')).toContainText(`Registered ${run}`);
+  await expect(page.getByLabel('Login email')).toHaveValue(`new@${run}.e2e.test`);
+  const generated = await page.getByLabel('Password', { exact: true }).inputValue();
+  expect(generated).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
+  const fresh = await browser.newContext();
+  const login = await fresh.request.post('/api/auth/login', { data: { email: `new@${run}.e2e.test`, password: generated } });
+  expect(login.ok()).toBe(true);
+  await fresh.close();
+
+  // Or a setup link, when the administrator should choose their own password.
+  await page.getByTestId('show-register').click();
+  await page.getByTestId('org-name-input').fill(`Linked ${run}`);
+  await page.getByTestId('admin-name-input').fill('Link Admin');
+  await page.getByTestId('admin-email-input').fill(`link@${run}.e2e.test`);
+  await page.getByLabel('Send a setup link so they choose their own password').check();
+  await page.getByTestId('register-org-submit').click();
   await expect(page.getByLabel('Setup link')).toHaveValue(/reset-password\?token=/);
 
   // Switch the question bank off for the customer organization.

@@ -18,6 +18,7 @@ import { Billing, PlanUsage, ScimSettings, SsoSettings } from '@/components/Iden
 import { PageHeader } from '@/components/neon/PageHeader';
 import { KeyRound, Settings } from 'lucide-react';
 import { InfoTip } from '@/components/neon/InfoTip';
+import { ThemeMenu } from '@/components/quantum/ThemeMenu';
 
 type Task = 'architect' | 'translate' | 'insights';
 const TASK_NAMES: Record<Task, string> = {
@@ -97,7 +98,7 @@ export default function SettingsPage() {
   if (me && me.role === 'PROGRAMMER') {
     return (
       <Shell crumbs={<Link href="/">Dashboard</Link>}>
-        <PageHeader icon={KeyRound} title="API keys" help="page.apiKeys" />
+        <PageHeader icon={KeyRound} title="API keys" help="page.apiKeys" actions={<ThemeMenu />} />
         <ApiKeys isAdmin={false} />
       </Shell>
     );
@@ -105,7 +106,9 @@ export default function SettingsPage() {
   if (me && me.role !== 'ADMIN') {
     return (
       <Shell crumbs={<Link href="/">Dashboard</Link>}>
-        <p className="muted">Only administrators can change organization settings.</p>
+        <PageHeader icon={Settings} title="Settings" help="page.settings" actions={<ThemeMenu />}>
+          Your theme and colour mode. Only administrators can change organization settings.
+        </PageHeader>
       </Shell>
     );
   }
@@ -135,6 +138,7 @@ export default function SettingsPage() {
         help="page.settings"
         actions={
           <>
+            <ThemeMenu />
             {me?.canManageIntegrations ? (
               <Link href="/settings/integrations" className="btn primary" data-testid="integrations-link">
                 Integrations

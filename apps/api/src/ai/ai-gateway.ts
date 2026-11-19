@@ -3,7 +3,7 @@ import { config, type ModelPrice } from '../config';
 import { integration } from '../platform/integrations';
 import { type AuditService } from '../common/audit.service';
 import { AiError, type AiProvider, type AiTokenUsage } from './ai-provider';
-import { notConfigured } from './claude.provider';
+import { aiSetupReason, notConfigured } from './claude.provider';
 import { type AiUsageRepository } from './ai-usage.repository';
 import { CircuitBreaker } from './circuit-breaker';
 
@@ -26,7 +26,7 @@ export interface EffectivePolicy {
   isDefault: boolean;
 }
 
-/** micro-USD for one call, from the AI_PRICING table (USD per million tokens). */
+/** micro-USD for one call, from the price table in Settings > Integrations (USD per million tokens). */
 export function costMicroUsd(price: ModelPrice | undefined, u: AiTokenUsage | undefined): bigint {
   if (!price || !u) return 0n;
   const usd =
@@ -38,13 +38,13 @@ export function costMicroUsd(price: ModelPrice | undefined, u: AiTokenUsage | un
   return BigInt(Math.round(usd * 1_000_000));
 }
 
-/** Price list from Settings > Integrations, else AI_PRICING. */
+/** Price list from Settings > Integrations (none set: costs are not estimated). */
 function aiPricing(): Record<string, ModelPrice> {
   const raw = integration('anthropic').values.pricing;
   try {
-    return raw ? (JSON.parse(raw) as Record<string, ModelPrice>) : config().AI_PRICING;
+    return raw ? (JSON.parse(raw) as Record<string, ModelPrice>) : {};
   } catch {
-    return config().AI_PRICING;
+    return {};
   }
 }
 
@@ -107,6 +107,8 @@ export class AiGateway {
     );
     return {
       configured: this.configured,
+      /** Why AI is off and who turns it on where (empty when it works). */
+      setup: this.configured ? null : aiSetupReason(),
       provider: this.provider.name,
       model: this.provider.model || null,
       tasks,

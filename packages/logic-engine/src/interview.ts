@@ -15,6 +15,7 @@ import {
   type AnswerValue,
   type Answers,
   type GridQuestion,
+  type OpenQuestion,
   type Option,
   type Page,
   type Question,
@@ -247,6 +248,11 @@ export const SYSTEM_MESSAGES = {
   minSelected: 'Choose at least {n}.',
   maxSelected: 'Choose at most {n}.',
   enterText: 'Enter text.',
+  enterEmail: 'Enter a valid email address.',
+  enterPhone: 'Enter a valid phone number.',
+  enterDate: 'Enter a valid date or time.',
+  useLocation: 'Use my current location',
+  locationUnavailable: 'Your location could not be read. Type it instead.',
   maxLength: 'Use at most {n} characters.',
   enterNumber: 'Enter a number.',
   wholeNumber: 'Enter a whole number.',
@@ -357,6 +363,23 @@ function isEmpty(v: unknown): boolean {
   );
 }
 
+const OPEN_FORMAT_PATTERNS: Record<string, RegExp> = {
+  email: /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/,
+  phone: /^\+?[0-9 ()./-]{5,30}$/,
+  date: /^\d{4}-\d{2}-\d{2}$/,
+  time: /^\d{2}:\d{2}$/,
+  datetime: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
+};
+
+/** The error for open text that does not match its format (email, phone, date, time), or null. */
+function checkOpenFormat(format: OpenQuestion['format'], text: string, msg: SystemMessages): string | null {
+  if (!format || format === 'text' || format === 'location') return null;
+  const ok =
+    OPEN_FORMAT_PATTERNS[format]!.test(text) && (format !== 'date' && format !== 'datetime' ? true : !Number.isNaN(Date.parse(text)));
+  if (ok) return null;
+  return format === 'email' ? msg.enterEmail : format === 'phone' ? msg.enterPhone : msg.enterDate;
+}
+
 /** Coerce and check one submitted answer. Returns the normalized value or an error message. */
 export function normalizeAnswer(
   q: Question,
@@ -388,12 +411,16 @@ export function normalizeAnswer(
       return { value: vals.sort((a, b) => a - b) };
     }
     case 'open': {
+      if (q.dontKnow && (raw === q.dontKnow.code || raw === String(q.dontKnow.code))) return { value: q.dontKnow.code };
       if (typeof raw !== 'string') return { error: msg.enterText };
       const text = raw.trim();
       if (text.length > q.maxLength) return { error: fillMessage(msg.maxLength, { n: q.maxLength }) };
+      const formatError = checkOpenFormat(q.format, text, msg);
+      if (formatError) return { error: formatError };
       return { value: text };
     }
     case 'numeric': {
+      if (q.dontKnow && raw === q.dontKnow.code) return { value: q.dontKnow.code };
       const n = typeof raw === 'string' ? Number(raw.trim()) : raw;
       if (typeof n !== 'number' || !Number.isFinite(n)) return { error: msg.enterNumber };
       if (q.integer && !Number.isInteger(n)) return { error: msg.wholeNumber };
@@ -670,9 +697,23 @@ export type RenderedQuestion = Question & {
   renderedText: string;
   /** MaxDiff: this respondent's sets; conjoint: their tasks (concepts as level codes per attribute). */
   design?: { version: number; sets?: number[][]; tasks?: number[][][] };
+  /** Custom HTML of the question with piped answers HTML-escaped (renderers still sanitize it). */
+  renderedHtml?: string;
 };
 
+const escapeHtml = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** Replace {{VAR}} in custom question HTML; the answer text is escaped so it cannot add markup. */
+export function pipeHtml(html: string, def: SurveyDefinition, answers: Answers): string {
+  return html.replace(PIPE_PATTERN, (_, id: string) => escapeHtml(answerText(def, id, answers)));
+}
+
 export function renderQuestion(template: Question, def: SurveyDefinition, answers: Answers, seed: string): RenderedQuestion {
+  const r = renderQuestionInner(template, def, answers, seed);
+  return r.html ? { ...r, renderedHtml: pipeHtml(r.html, def, answers) } : r;
+}
+
+function renderQuestionInner(template: Question, def: SurveyDefinition, answers: Answers, seed: string): RenderedQuestion {
   const q = withDynamicOptions(template, def, answers);
   const renderedText = pipeText(q.text, def, answers);
   if ((q.type === 'single' || q.type === 'multi' || q.type === 'ranking' || q.type === 'sum' || q.type === 'cardsort') && q.randomize) {

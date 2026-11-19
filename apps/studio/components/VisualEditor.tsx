@@ -4,7 +4,7 @@
  * this editor are two views of the same object.
  */
 import { ConjointForm, MaxDiffForm } from './ChoiceForms';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Option, Page, Question, QuestionType, SurveyDefinition } from '@zapx/survey-schema';
 import { MediaLibraryProvider, OptionImagePicker, QuestionMediaEditor, useHasMediaLibrary } from './MediaLibrary';
 import {
@@ -22,7 +22,10 @@ import {
 } from './FlowEditor';
 import { InsertBlockFromBank, InsertFromBank, SavePageToBank, SaveQuestionToBank } from './QuestionBank';
 import { InfoTip } from '@/components/neon/InfoTip';
-import { qtypeHelp } from '@/lib/help';
+import { buildFromLibrary, newTypeHelp, questionHelp, QuestionLibraryButton, TypeSelect, type NewTypeKey } from './QuestionLibrary';
+import { catalogTypeOf } from '@zapx/survey-schema';
+import { sanitizeQuestionHtml, textToHtml } from '@zapx/survey-renderer';
+import { openPreviewTab, syncPreviewTab } from './PreviewTab';
 
 type Selection = { kind: 'survey' } | { kind: 'page'; page: number } | { kind: 'question'; page: number; q: number };
 
@@ -46,13 +49,7 @@ const TYPE_LABELS: Record<QuestionType, string> = {
   info: 'Information',
 };
 
-function nextId(def: SurveyDefinition, prefix: string): string {
-  const used = new Set(def.pages.flatMap((p) => p.questions.map((q) => q.id.toLowerCase())));
-  for (let i = 1; ; i++) if (!used.has(`${prefix}${i}`.toLowerCase())) return `${prefix}${i}`;
-}
-
-function newQuestion(def: SurveyDefinition, type: QuestionType): Question {
-  const id = nextId(def, 'Q');
+function newQuestion(id: string, type: QuestionType): Question {
   const base = { id, text: 'New question', required: true, validations: [] };
   const opts: Option[] = [
     { code: 1, label: 'Option 1' },
@@ -190,7 +187,12 @@ export function VisualEditor({
   /** Enables media uploads and pickers. */
   surveyId?: string;
 }) {
-  const editor = <Editor def={def} onChange={onChange} readOnly={readOnly} />;
+  useEffect(() => {
+    if (!surveyId) return;
+    const t = setTimeout(() => syncPreviewTab(surveyId, def), 250);
+    return () => clearTimeout(t);
+  }, [surveyId, def]);
+  const editor = <Editor def={def} onChange={onChange} readOnly={readOnly} surveyId={surveyId} />;
   return surveyId ? (
     <MediaLibraryProvider surveyId={surveyId} readOnly={!!readOnly}>
       {editor}
@@ -200,9 +202,20 @@ export function VisualEditor({
   );
 }
 
-function Editor({ def, onChange, readOnly }: { def: SurveyDefinition; onChange: (d: SurveyDefinition) => void; readOnly?: boolean }) {
+function Editor({
+  def,
+  onChange,
+  readOnly,
+  surveyId,
+}: {
+  def: SurveyDefinition;
+  onChange: (d: SurveyDefinition) => void;
+  readOnly?: boolean;
+  surveyId?: string;
+}) {
   const [sel, setSel] = useState<Selection>({ kind: 'survey' });
-  const [newType, setNewType] = useState<QuestionType>('single');
+  const [newType, setNewType] = useState<NewTypeKey>('lib:single');
+  const build = (key: NewTypeKey = newType) => buildFromLibrary(def, key, (t, id) => newQuestion(id, t));
 
   const setPages = (pages: Page[]) => onChange({ ...def, pages });
   const setPage = (pi: number, page: Page) => setPages(def.pages.map((p, i) => (i === pi ? page : p)));
@@ -213,14 +226,16 @@ function Editor({ def, onChange, readOnly }: { def: SurveyDefinition; onChange: 
     const ids = new Set(def.pages.map((p) => p.id));
     let n = def.pages.length + 1;
     while (ids.has(`P${n}`)) n++;
-    setPages([...def.pages, { id: `P${n}`, questions: [newQuestion(def, newType)] }]);
+    setPages([...def.pages, { id: `P${n}`, questions: build() }]);
     setSel({ kind: 'question', page: def.pages.length, q: 0 });
   };
-  const addQuestion = (pi: number) => {
+  const addQuestion = (pi: number, key: NewTypeKey = newType) => {
     const page = def.pages[pi]!;
-    setPage(pi, { ...page, questions: [...page.questions, newQuestion(def, newType)] });
+    setPage(pi, { ...page, questions: [...page.questions, ...build(key)] });
     setSel({ kind: 'question', page: pi, q: page.questions.length });
   };
+  /** The page a new question goes on: the selected one, else the last. */
+  const currentPage = sel.kind === 'survey' ? def.pages.length - 1 : sel.page;
 
   const selected = sel.kind === 'question' ? def.pages[sel.page]?.questions[sel.q] : sel.kind === 'page' ? def.pages[sel.page] : undefined;
 
@@ -336,18 +351,18 @@ function Editor({ def, onChange, readOnly }: { def: SurveyDefinition; onChange: 
             <div className="row" style={{ alignItems: 'flex-end', gap: 6, flexWrap: 'nowrap' }}>
               <label className="field" style={{ flex: 1, minWidth: 0 }}>
                 New question type
-                <select value={newType} onChange={(e) => setNewType(e.target.value as QuestionType)}>
-                  {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
+                <TypeSelect value={newType} onChange={setNewType} />
               </label>
               <span style={{ paddingBottom: 8 }}>
-                <InfoTip key={newType} k={qtypeHelp(newType)} />
+                <InfoTip key={newType} {...newTypeHelp(newType)} />
               </span>
             </div>
+            <QuestionLibraryButton
+              onPick={(k) => {
+                setNewType(k);
+                addQuestion(currentPage, k);
+              }}
+            />
             <button onClick={addPage}>+ Add page</button>
           </div>
         ) : null}
@@ -380,7 +395,14 @@ function Editor({ def, onChange, readOnly }: { def: SurveyDefinition; onChange: 
               q={selected as Question}
               def={def}
               canSave={!readOnly}
+              surveyId={surveyId}
               onChange={(q) => setQuestion(sel.page, sel.q, q)}
+              onAddFollowUp={(q, follow) => {
+                const page = def.pages[sel.page]!;
+                const questions = page.questions.map((x, i) => (i === sel.q ? q : x));
+                questions.splice(sel.q + 1, 0, follow);
+                setPage(sel.page, { ...page, questions });
+              }}
               onMove={(d) => {
                 const page = def.pages[sel.page]!;
                 setPage(sel.page, { ...page, questions: move(page.questions, sel.q, sel.q + d) });
@@ -716,12 +738,148 @@ function PageForm({
   );
 }
 
+/** Parse pasted answers: one per line, either "label" or "code<tab, ; = or .>label" (e.g. from Excel or Word). */
+export function parsePastedOptions(text: string, existing: Option[] = []): Option[] {
+  const out: Option[] = [];
+  const used = new Set(existing.map((o) => o.code));
+  let next = Math.max(0, ...existing.filter((o) => o.code < 90).map((o) => o.code)) + 1;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^\s*[-*•]\s*/, '').trim();
+    if (!line) continue;
+    const m = /^(-?\d{1,6})\s*(?:\t|[;=.)]|\s{2,}|\s-\s)\s*(.+)$/.exec(line);
+    let code: number;
+    let label: string;
+    if (m && !used.has(Number(m[1]))) {
+      code = Number(m[1]);
+      label = m[2]!.trim();
+    } else {
+      while (used.has(next)) next++;
+      code = next;
+      label = line;
+    }
+    used.add(code);
+    out.push({ code, label });
+  }
+  return out;
+}
+
+function PasteOptions({ options, onChange }: { options: Option[]; onChange: (o: Option[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  if (!open)
+    return (
+      <button type="button" onClick={() => setOpen(true)}>
+        Paste answer list
+      </button>
+    );
+  const parsed = parsePastedOptions(text);
+  return (
+    <div className="panel stack paste-options">
+      <label className="field">
+        Paste one answer per line. Codes are optional: &quot;1&lt;tab&gt;Yes&quot;, &quot;1; Yes&quot; or &quot;1. Yes&quot;.
+        <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} aria-label="Pasted answers" autoFocus />
+      </label>
+      <span className="muted small">{parsed.length} answer(s) found.</span>
+      <div className="row">
+        <button
+          type="button"
+          className="primary"
+          disabled={!parsed.length}
+          onClick={() => {
+            onChange(parsed);
+            setOpen(false);
+            setText('');
+          }}
+        >
+          Replace the answers
+        </button>
+        <button
+          type="button"
+          disabled={!parsed.length}
+          onClick={() => {
+            onChange([...options, ...parsePastedOptions(text, options)]);
+            setOpen(false);
+            setText('');
+          }}
+        >
+          Add to the answers
+        </button>
+        <button type="button" className="link" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** "Other (please specify)" and "None of these" style answers with the label the programmer chooses. */
+function SpecialOptions({
+  options,
+  onChange,
+  multi,
+  onAddOpenEnd,
+}: {
+  options: Option[];
+  onChange: (o: Option[]) => void;
+  multi?: boolean;
+  /** Add an open-end answer: the editor adds the follow-up text question. */
+  onAddOpenEnd?: (option: Option) => void;
+}) {
+  const [oeLabel, setOeLabel] = useState('Other (please specify)');
+  const [exLabel, setExLabel] = useState(multi ? 'None of these' : "Don't know");
+  const freeCode = (preferred: number[]) => {
+    const used = new Set(options.map((o) => o.code));
+    return preferred.find((c) => !used.has(c)) ?? Math.max(0, ...options.map((o) => o.code)) + 1;
+  };
+  return (
+    <div className="row special-options" style={{ alignItems: 'flex-end' }}>
+      {onAddOpenEnd ? (
+        <span className="row" style={{ gap: 6, alignItems: 'flex-end' }}>
+          <label className="field">
+            Open-end answer label
+            <input value={oeLabel} onChange={(e) => setOeLabel(e.target.value)} aria-label="Open-end answer label" />
+          </label>
+          <button
+            type="button"
+            disabled={!oeLabel.trim()}
+            onClick={() => {
+              const opt: Option = { code: freeCode([97, 96, 95]), label: oeLabel.trim(), anchor: true };
+              onAddOpenEnd(opt);
+            }}
+          >
+            + Open-end answer
+          </button>
+        </span>
+      ) : null}
+      <span className="row" style={{ gap: 6, alignItems: 'flex-end' }}>
+        <label className="field">
+          Exclusive answer label
+          <input value={exLabel} onChange={(e) => setExLabel(e.target.value)} aria-label="Exclusive answer label" />
+        </label>
+        <button
+          type="button"
+          disabled={!exLabel.trim()}
+          onClick={() =>
+            onChange([
+              ...options,
+              { code: freeCode([99, 98, 96]), label: exLabel.trim(), anchor: true, ...(multi ? { exclusive: true } : {}) },
+            ])
+          }
+        >
+          + Exclusive answer
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function OptionsEditor({
   options,
   onChange,
   multi,
   images,
   anchors = true,
+  onAddOpenEnd,
 }: {
   options: Option[];
   onChange: (o: Option[]) => void;
@@ -729,6 +887,7 @@ function OptionsEditor({
   /** Offer a picture per option (image choice). */
   images?: boolean;
   anchors?: boolean;
+  onAddOpenEnd?: (option: Option) => void;
 }) {
   const set = (i: number, o: Option) => onChange(options.map((x, j) => (j === i ? o : x)));
   const withImages = useHasMediaLibrary() && images;
@@ -798,14 +957,22 @@ function OptionsEditor({
         ))}
         <tr>
           <td colSpan={6}>
-            <button
-              onClick={() => {
-                const code = Math.max(0, ...options.filter((o) => o.code < 90).map((o) => o.code)) + 1;
-                onChange([...options, { code, label: `Option ${code}` }]);
-              }}
-            >
-              + Option
-            </button>
+            <div className="row">
+              <button
+                onClick={() => {
+                  const code = Math.max(0, ...options.filter((o) => o.code < 90).map((o) => o.code)) + 1;
+                  onChange([...options, { code, label: `Option ${code}` }]);
+                }}
+              >
+                + Option
+              </button>
+              <PasteOptions options={options} onChange={onChange} />
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td colSpan={6}>
+            <SpecialOptions options={options} onChange={onChange} multi={multi} onAddOpenEnd={onAddOpenEnd} />
           </td>
         </tr>
       </tbody>
@@ -820,23 +987,53 @@ function QuestionForm({
   onMove,
   onDelete,
   canSave,
+  surveyId,
+  onAddFollowUp,
 }: {
   q: Question;
   def: SurveyDefinition;
   /** Offer "Save to question bank". */
   canSave?: boolean;
+  surveyId?: string;
   onChange: (q: Question) => void;
   onMove: (d: number) => void;
   onDelete?: () => void;
+  /** Change this question and put a follow-up question right after it (open-end answers). */
+  onAddFollowUp?: (q: Question, follow: Question) => void;
 }) {
+  const libType = catalogTypeOf(q.catalogType);
+  const addOpenEnd =
+    onAddFollowUp && (q.type === 'single' || q.type === 'multi' || q.type === 'ranking')
+      ? (opt: Option) => {
+          const used = new Set(def.pages.flatMap((p) => p.questions.map((x) => x.id.toLowerCase())));
+          let id = `${q.id}_OE`;
+          for (let n = 2; used.has(id.toLowerCase()); n++) id = `${q.id}_OE${n}`;
+          const follow: Question = {
+            id,
+            type: 'open',
+            text: `${opt.label.replace(/\s*\(?please specify\)?\s*$/i, '') || 'Other'}: please specify`,
+            condition: q.type === 'single' ? `${q.id} == ${opt.code}` : `selected(${q.id}, ${opt.code})`,
+            required: true,
+            validations: [],
+            multiline: false,
+            maxLength: 500,
+          };
+          onAddFollowUp({ ...q, options: [...q.options, opt] } as Question, follow);
+        }
+      : undefined;
   return (
     <>
-      <div className="row">
+      <div className="row q-head">
         <h2 style={{ margin: 0 }}>
-          <span className="mono">{q.id}</span> <span className="badge">{TYPE_LABELS[q.type]}</span>
-          <InfoTip key={q.type} k={qtypeHelp(q.type)} />
+          <span className="mono">{q.id}</span> <span className="badge">{libType ? libType.name : TYPE_LABELS[q.type]}</span>
+          <InfoTip key={`${q.type}-${q.catalogType}`} {...questionHelp(q)} />
         </h2>
         <div style={{ flex: 1 }} />
+        {surveyId ? (
+          <button type="button" onClick={() => openPreviewTab(surveyId, def, q.id)} title="Open this question full page in a new tab">
+            Preview in new tab
+          </button>
+        ) : null}
         <button onClick={() => onMove(-1)} aria-label="Move question up">
           ↑
         </button>
@@ -849,6 +1046,7 @@ function QuestionForm({
           </button>
         ) : null}
       </div>
+      {libType?.note ? <p className="muted small">{libType.note}</p> : null}
       {canSave ? <SaveQuestionToBank q={q} /> : null}
       <Text label="Variable name" mono value={q.id} onChange={(v) => onChange({ ...q, id: v ?? '' })} />
       <Text
@@ -857,6 +1055,7 @@ function QuestionForm({
         value={q.text}
         onChange={(v) => onChange({ ...q, text: v ?? '' })}
       />
+      <HtmlEditor q={q} onChange={onChange} />
       <Text
         label="Show only if (optional)"
         mono
@@ -874,7 +1073,23 @@ function QuestionForm({
       {q.type === 'single' || q.type === 'multi' ? (
         <>
           <h3>Answer options</h3>
-          <OptionsEditor options={q.options} multi={q.type === 'multi'} images onChange={(options) => onChange({ ...q, options })} />
+          <OptionsEditor
+            options={q.options}
+            multi={q.type === 'multi'}
+            images
+            onChange={(options) => onChange({ ...q, options })}
+            onAddOpenEnd={addOpenEnd}
+          />
+          <label className="field" style={{ maxWidth: 320 }}>
+            Shown as
+            <select
+              value={q.display ?? 'list'}
+              onChange={(e) => onChange({ ...q, display: e.target.value === 'dropdown' ? 'dropdown' : undefined })}
+            >
+              <option value="list">{q.type === 'multi' ? 'Checkboxes' : 'Radio buttons'}</option>
+              <option value="dropdown">{q.type === 'multi' ? 'Multi-select dropdown' : 'Dropdown'}</option>
+            </select>
+          </label>
           <Check
             label="Randomize order (anchored options stay in place)"
             value={q.randomize}
@@ -918,6 +1133,7 @@ function QuestionForm({
               </>
             ) : null}
           </div>
+          <DontKnowEditor value={q.dontKnow} defaultCode={-99} onChange={(dontKnow) => onChange({ ...q, dontKnow })} />
         </>
       ) : null}
       {q.type === 'scale' ? (
@@ -934,10 +1150,20 @@ function QuestionForm({
             <Num label="To" value={q.max} onChange={(v) => onChange({ ...q, max: v ?? 10 })} />
             <Text label="Low end label" value={q.minLabel} onChange={(v) => onChange({ ...q, minLabel: v })} />
             <Text label="High end label" value={q.maxLabel} onChange={(v) => onChange({ ...q, maxLabel: v })} />
+            <label className="field">
+              Shown as
+              <select
+                value={q.display ?? 'buttons'}
+                onChange={(e) => onChange({ ...q, display: e.target.value === 'stars' ? 'stars' : undefined })}
+              >
+                <option value="buttons">Numbered buttons</option>
+                <option value="stars">Stars</option>
+              </select>
+            </label>
           </div>
           <div className="row">
             <Check
-              label="Offer an answer outside the scale"
+              label="Exclusive answer outside the scale (e.g. Don't know)"
               value={!!q.dontKnow}
               onChange={(v) => onChange({ ...q, dontKnow: v ? { code: 99, label: "Don't know" } : undefined })}
             />
@@ -962,7 +1188,7 @@ function QuestionForm({
         <>
           <h3>Items to rank</h3>
           <p className="muted small">Stored as the codes in rank order. In logic, {q.id}.2 is the rank given to item 2 (1 = first).</p>
-          <OptionsEditor options={q.options} images onChange={(options) => onChange({ ...q, options })} />
+          <OptionsEditor options={q.options} images onChange={(options) => onChange({ ...q, options })} onAddOpenEnd={addOpenEnd} />
           <div className="row">
             <Check
               label="Randomize order (anchored items stay in place)"
@@ -1021,10 +1247,30 @@ function QuestionForm({
         </>
       ) : null}
       {q.type === 'open' ? (
-        <div className="row">
-          <Check label="Multi-line" value={q.multiline} onChange={(v) => onChange({ ...q, multiline: v })} />
-          <Num label="Max characters" value={q.maxLength} onChange={(v) => onChange({ ...q, maxLength: v ?? 2000 })} />
-        </div>
+        <>
+          <div className="row">
+            <label className="field">
+              Answer format
+              <select
+                value={q.format ?? 'text'}
+                onChange={(e) => onChange({ ...q, format: e.target.value === 'text' ? undefined : (e.target.value as typeof q.format) })}
+              >
+                <option value="text">Free text</option>
+                <option value="email">Email address</option>
+                <option value="phone">Phone number</option>
+                <option value="date">Date</option>
+                <option value="time">Time</option>
+                <option value="datetime">Date and time</option>
+                <option value="location">Location (GPS)</option>
+              </select>
+            </label>
+            {!q.format || q.format === 'text' ? (
+              <Check label="Multi-line" value={q.multiline} onChange={(v) => onChange({ ...q, multiline: v })} />
+            ) : null}
+            <Num label="Max characters" value={q.maxLength} onChange={(v) => onChange({ ...q, maxLength: v ?? 2000 })} />
+          </div>
+          <DontKnowEditor value={q.dontKnow} defaultCode={99} onChange={(dontKnow) => onChange({ ...q, dontKnow })} />
+        </>
       ) : null}
       {q.type === 'grid' ? (
         <>
@@ -1066,7 +1312,11 @@ function QuestionForm({
               onClick={() => onChange({ ...q, rows: [...q.rows, { id: `r${q.rows.length + 1}`, label: `Item ${q.rows.length + 1}` }] })}
             >
               + Row
-            </button>
+            </button>{' '}
+            <PasteOptions
+              options={q.rows.map((r, i) => ({ code: i + 1, label: r.label }))}
+              onChange={(opts) => onChange({ ...q, rows: opts.map((o, i) => ({ id: `r${i + 1}`, label: o.label })) })}
+            />
           </div>
           <Check label="Randomize rows" value={q.randomizeRows} onChange={(v) => onChange({ ...q, randomizeRows: v })} />
           <h3>Scale columns</h3>
@@ -1124,5 +1374,105 @@ function QuestionForm({
         </>
       ) : null}
     </>
+  );
+}
+
+/** Exclusive "Don't know" answer for text and number questions, with its own code and label. */
+function DontKnowEditor({
+  value,
+  defaultCode,
+  onChange,
+}: {
+  value: { code: number; label: string } | undefined;
+  defaultCode: number;
+  onChange: (v: { code: number; label: string } | undefined) => void;
+}) {
+  return (
+    <div className="row">
+      <Check
+        label="Exclusive answer instead of typing (e.g. Don't know)"
+        value={!!value}
+        onChange={(v) => onChange(v ? { code: defaultCode, label: "Don't know" } : undefined)}
+      />
+      {value ? (
+        <>
+          <Num label="Its code" value={value.code} onChange={(v) => onChange({ ...value, code: v ?? defaultCode })} />
+          <Text label="Its label" value={value.label} onChange={(v) => onChange({ ...value, label: v ?? '' })} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Client feedback 2026-11: show the question as HTML and let the programmer change it. Saved HTML is
+ * shown to respondents through the renderer's allow-list (no scripts, links, forms or outside images).
+ */
+function HtmlEditor({ q, onChange }: { q: Question; onChange: (q: Question) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const preview = open ? sanitizeQuestionHtml(draft) : null;
+  if (!open)
+    return (
+      <div className="row">
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(q.html ?? textToHtml(q.text));
+            setOpen(true);
+          }}
+        >
+          {'</>'} {q.html ? 'Edit HTML' : 'Show HTML code'}
+        </button>
+        {q.html ? (
+          <>
+            <span className="badge">custom HTML</span>
+            <button type="button" className="link danger small" onClick={() => onChange({ ...q, html: undefined })}>
+              Remove HTML (use plain text)
+            </button>
+          </>
+        ) : null}
+      </div>
+    );
+  return (
+    <div className="panel stack html-editor">
+      <label className="field">
+        Question HTML
+        <textarea
+          className="mono"
+          rows={8}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          spellCheck={false}
+          aria-label="Question HTML"
+        />
+      </label>
+      <p className="muted small">
+        Formatting, lists, tables and line breaks are allowed; scripts, links, forms, frames and outside pictures are removed. Use{' '}
+        {'{{VAR}}'} to pipe an answer. The plain question text above stays the text for screen readers and translations.
+      </p>
+      {preview !== null ? (
+        <div className="html-preview">
+          <span className="muted small">Shown to respondents as:</span>
+          <div className="zx-html" dangerouslySetInnerHTML={{ __html: preview }} />
+        </div>
+      ) : null}
+      <div className="row">
+        <button
+          type="button"
+          className="primary"
+          onClick={() => {
+            const html = draft.trim();
+            onChange({ ...q, html: html && html !== textToHtml(q.text) ? html : undefined });
+            setOpen(false);
+          }}
+        >
+          Apply HTML
+        </button>
+        <button type="button" className="link" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

@@ -97,7 +97,7 @@ interviewer at once). See [data quality](data-quality.md).
 
 ## Transcripts of recordings (Milestone 17)
 
-With `TRANSCRIPTION=deepgram`, a `DEEPGRAM_API_KEY` and a `DEEPGRAM_MODEL` (the Deepgram model to use;
+With Settings → Integrations → Deepgram set up (an API key and the Deepgram model to use;
 there is no default), admins and programmers see **Transcribe N** under Quality & fieldwork →
 Photos and recordings. It asks first, because the recordings leave SampCode: each recording without a
 transcript is sent to Deepgram in a background job (up to 200 per job), in the interview's language

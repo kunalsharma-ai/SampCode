@@ -64,7 +64,9 @@ the API's `message`.
   `Invalid configuration: <name>: <reason>`. Common ones: `DATABASE_URL` empty, `JWT_SECRET` shorter
   than 32 characters, and, with `NODE_ENV=production`, `COOKIE_SECURE` not `true`, `SECRETS_KEY`
   missing or equal to `JWT_SECRET` or the example value, `CALLBACK_ALLOW_PRIVATE_HOSTS=true`,
-  `SSO_ALLOW_INSECURE_ISSUER=true`, or `FILE_STORE=s3` without `S3_BUCKET`.
+  or `SSO_ALLOW_INSECURE_ISSUER=true`. A missing or changed `SECRETS_KEY` stops start-up with
+  "The secrets SampCode keeps in the database cannot be opened": put back the key this installation
+  started with (ADR 0043).
 - **Files:** `.env`, `.env.example`, `apps/api/src/config.ts` (the `superRefine` near the end lists
   the production rules), [CONFIGURATION.md](CONFIGURATION.md).
 - **Commands:** `node apps/api/dist/main.js` prints the message and exits with code 1.
@@ -192,7 +194,8 @@ API code change, stop it and run it again (or run `pnpm --filter @zapx/api build
 
 ### 3c. AI features fail ("AI is not configured", budget reached, timeouts)
 
-- **Causes:** no `ANTHROPIC_API_KEY` (and, on PR #28, no key in Settings → Integrations), the
+- **Causes:** Claude is not set up and switched on in Settings → Integrations (an `ANTHROPIC_API_KEY`
+  variable is ignored, ADR 0043), the
   tenant's AI budget is used up, the circuit breaker is open after `AI_BREAKER_FAILURES` errors
   (it stays open `AI_BREAKER_OPEN_MS`), or a call exceeded `AI_TIMEOUT_MS`.
 - **Files:** `apps/api/src/ai/` (gateway, budgets, breaker), [docs/modules/ai-gateway.md](../modules/ai-gateway.md).
@@ -301,7 +304,7 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 - Check the email exactly (stored as given at creation). The login checks the password even for
   unknown emails (dummy hash) so the message is the same either way.
 - **Fix:** the member uses **Forgot your password?** on the sign-in page (emails a link when
-  `EMAIL_PROVIDER` is set), or an ADMIN opens Settings → Team → **Reset password** and passes the
+  SendGrid is set up in Settings → Integrations), or an ADMIN opens Settings → Team → **Reset password** and passes the
   one-time link on privately. The link works once, for `PASSWORD_RESET_HOURS` (default 24), and a
   newer link voids older ones. Code: `apps/api/src/auth/password-reset.service.ts` _(branch
   `security-fixes`; before it, there was no reset at all and the only way was a database update)_.
@@ -416,7 +419,7 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 - **Causes:** export files are deleted after `EXPORT_FILE_TTL_HOURS`; `FILES_DIR` is relative
   (default `.data/files`) and resolved from the **current directory** of the process
   (`apps/api/src/jobs/file-store.ts`), so an API started from another folder than the worker looks in
-  another place; with `FILE_STORE=s3` the bucket, prefix or IAM role is wrong.
+  another place; with Settings → Integrations → Amazon S3 the bucket, prefix or IAM role is wrong.
 - **Fix:** set `FILES_DIR` to an absolute path shared by API and worker, or use S3; re-run the export.
 - **Confirm:** `GET /api/files/<id>` returns the file.
 
@@ -430,7 +433,7 @@ For a clean local database: `mongosh "$DATABASE_URL" --eval 'db.dropDatabase()' 
 
 ### 8e. S3 errors (`AccessDenied`, `NoSuchBucket`)
 
-- Check `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `S3_KMS_KEY_ID` and that the task role can use the KMS
+- Check the bucket, region, folder and KMS key in Settings → Integrations → Amazon S3, and that the role can use the KMS
   key. S3 was only tested against a fake S3, so this is listed in
   [go-live.md](../operations/go-live.md) as a staging check.
 
@@ -501,7 +504,7 @@ More in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### 10e. Respondent country or IP is wrong behind the CDN
 
-- Only with a CDN in front: `EDGE_SHARED_SECRET` must match the `x-zapx-edge` header the CDN adds; otherwise
+- Only with a CDN in front: the shared secret in Settings → Integrations → CDN must match the `x-zapx-edge` header the CDN adds; otherwise
   `edgeTrust` (`apps/api/src/bootstrap.ts`) drops the address and country headers. Also check
   `TRUST_PROXY_HOPS`.
 
@@ -590,8 +593,9 @@ The member must belong to the operator organization (`set-operator.js <organizat
 ### 13a. A key saved in Settings → Integrations has no effect
 
 - Wait up to `INTEGRATIONS_REFRESH_MS` (15 s): each process re-reads the saved values on a timer.
-- The integration must be switched **on** in the CRM; once saved there, its switch wins over the
-  environment switch (`TELEPHONY`, `BILLING`, …).
+- The integration must be switched **on** in the CRM with every required field filled in. Environment
+  variables such as `TELEPHONY` or `BILLING` are not read any more (ADR 0043); the API log lists any
+  that are still set.
 - Press **Test** on the integration; the error message comes from `apps/api/src/platform/integration-checks.ts`.
 
 ### 13b. "Only administrators can see integrations" or the page is empty
