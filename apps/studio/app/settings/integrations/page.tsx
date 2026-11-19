@@ -1,8 +1,9 @@
 'use client';
 /**
  * Settings > Integrations: the platform operator's administrators paste keys, test the connection and
- * turn each provider on or off. Saved values win over the server's environment; secrets are never
- * shown again (only their last four characters). Every change and test is in the audit log.
+ * turn each provider on or off. This is the only place API keys are set (ADR 0043): they are stored
+ * encrypted in the database, never in the server's environment. Secrets are never shown again (only
+ * their last four characters). Every change and test is in the audit log.
  */
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -23,8 +24,7 @@ interface Field {
   kind: 'text' | 'json' | 'select';
   options: string[] | null;
   placeholder: string | null;
-  env: string;
-  origin: 'crm' | 'env' | 'default' | 'none';
+  origin: 'crm' | 'default' | 'none';
   value: string | null;
   isSet: boolean;
   hint: string | null;
@@ -40,7 +40,7 @@ interface Integration {
   warning: string | null;
   enabled: boolean;
   switchedOn: boolean;
-  source: 'crm' | 'env';
+  source: 'crm' | 'none';
   missing: string[];
   updatedAt: string | null;
   callbacks: Array<{ label: string; url: string }>;
@@ -55,7 +55,6 @@ interface TestResult {
 
 const ORIGIN: Record<Field['origin'], string> = {
   crm: 'saved here',
-  env: 'server setting',
   default: 'default',
   none: '',
 };
@@ -129,7 +128,7 @@ function IntegrationCard({ initial }: { initial: Integration }) {
       if (
         !(await confirm({
           title: `Forget everything saved here for ${it.name}?`,
-          message: 'It will use the server environment again.',
+          message: 'The saved keys are deleted and the integration is turned off. You can set it up again at any time.',
           confirmLabel: 'Forget settings',
           tone: 'danger',
         }))
@@ -160,11 +159,6 @@ function IntegrationCard({ initial }: { initial: Integration }) {
       <p className="muted small" style={{ margin: 0 }}>
         {it.privacy}
       </p>
-      {it.source === 'env' && it.switchedOn ? (
-        <p className="muted small" style={{ margin: 0 }}>
-          Running from the server environment. Saving here takes over from it.
-        </p>
-      ) : null}
       {it.switchedOn && it.missing.length ? (
         <p className="warn-text small" style={{ margin: 0 }}>
           Still needed: {it.missing.map((m) => it.fields.find((f) => f.name === m)?.label ?? m).join(', ')}.
@@ -198,9 +192,9 @@ function IntegrationCard({ initial }: { initial: Integration }) {
             const id = `${it.key}-${f.name}`;
             const placeholder = f.secret
               ? f.isSet
-                ? `Saved (${f.hint ?? 'set'}${f.origin === 'env' ? ', from the server' : ''}). Leave empty to keep it.`
+                ? `Saved (${f.hint ?? 'set'}). Leave empty to keep it.`
                 : (f.placeholder ?? 'Paste it here')
-              : f.origin === 'env' || f.origin === 'default'
+              : f.origin === 'default'
                 ? `${f.value} (${ORIGIN[f.origin]})`
                 : (f.placeholder ?? '');
             return (
@@ -238,10 +232,7 @@ function IntegrationCard({ initial }: { initial: Integration }) {
                     onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
                   />
                 )}
-                <span className="muted small">
-                  {f.help ? `${f.help} ` : ''}
-                  Server variable: <span className="mono">{f.env}</span>
-                </span>
+                {f.help ? <span className="muted small">{f.help}</span> : null}
               </label>
             );
           })}
@@ -284,7 +275,7 @@ function IntegrationCard({ initial }: { initial: Integration }) {
         ) : (
           <>
             <button className="primary" onClick={startEdit}>
-              {it.fields.some((f) => f.origin === 'crm' || f.origin === 'env') ? 'Edit' : 'Set up'}
+              {it.fields.some((f) => f.origin === 'crm') ? 'Edit' : 'Set up'}
             </button>
             <button disabled={busy || it.fields.every((f) => !f.isSet)} onClick={() => void testNow()}>
               Test connection
@@ -296,7 +287,7 @@ function IntegrationCard({ initial }: { initial: Integration }) {
             ) : null}
             {it.source === 'crm' ? (
               <button className="link small" disabled={busy} onClick={() => void reset()}>
-                Use server settings instead
+                Forget saved settings
               </button>
             ) : null}
           </>
@@ -349,8 +340,8 @@ export default function IntegrationsPage() {
     <Shell crumbs={crumbs}>
       <PageHeader icon={Plug} tone={2} eyebrow="Administration" title="Integrations" help="page.integrations">
         Connect the services SampCode uses for every organization on this installation. Paste a key, test the connection, then turn it on.
-        Keys are stored encrypted and are never shown again; every change and test is recorded in the{' '}
-        <Link href="/settings/audit">audit log</Link>. Anything saved here takes over from the server environment.
+        Keys are stored encrypted in the database and are never shown again; every change and test is recorded in the{' '}
+        <Link href="/settings/audit">audit log</Link>. No API key goes in a server file.
       </PageHeader>
       <ErrorNote error={error} />
       <div className="grid2" style={{ marginTop: 16 }}>
@@ -382,16 +373,20 @@ export default function IntegrationsPage() {
             <InfoTip k="section.integrationServer" />
           </h2>
           <p className="muted small" style={{ margin: 0 }}>
-            These protect or run the server itself, so they cannot be changed from a web page. A developer sets them once at deployment (see
-            the go-live guide):
+            SampCode needs these before it can read its database, so they are set once at installation (see the go-live guide). None of them
+            is an API key:
           </p>
           <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-            <li>The database address and password</li>
-            <li>The two master keys: JWT_SECRET (sign-in sessions) and SECRETS_KEY (encrypts the keys saved on this page)</li>
-            <li>The web addresses (STUDIO_URL, RUNTIME_BASE_URL), HTTPS and COOKIE_SECURE</li>
-            <li>The AWS resources: servers, load balancer, CDN, firewall, backups and the S3 bucket itself (Terraform)</li>
-            <li>The CDN shared secret and proxy settings, and where the background worker runs</li>
+            <li>The database user names and passwords</li>
+            <li>The web addresses (domains) and the email for HTTPS certificates</li>
+            <li>
+              The master key that encrypts the keys saved on this page. The server makes it by itself on the first start; keep a copy of it
+              with your backups.
+            </li>
           </ul>
+          <p className="muted small" style={{ margin: 0 }}>
+            The sign-in and link-signing secrets are made by SampCode on the first start and kept encrypted in the database too.
+          </p>
         </section>
       </div>
     </Shell>

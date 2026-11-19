@@ -1,7 +1,7 @@
 'use client';
 /**
- * Super admin: every integration. The platform integrations (AI, IPinfo, Deepgram, Twilio, Stripe,
- * file storage) are set up on the Integrations settings page; each organization's own integrations
+ * Super admin: every integration. The platform integrations (AI, IPinfo, Deepgram, Twilio, SMTP email, SendGrid,
+ * Stripe, file storage, SampAudience, CDN) are set up on the Integrations settings page; each organization's own integrations
  * (single sign-on, SCIM, webhooks, API keys, vendors, AI) can be allowed or blocked here.
  */
 import Link from 'next/link';
@@ -18,7 +18,7 @@ interface Platform {
   purpose: string;
   enabled: boolean;
   switchedOn: boolean;
-  source: 'crm' | 'env';
+  source: 'crm' | 'none';
   missing: string[];
 }
 
@@ -103,7 +103,7 @@ export default function SuperIntegrationsPage() {
                         {status(p)}
                         {p.switchedOn && p.missing.length ? <div className="muted">Missing: {p.missing.join(', ')}</div> : null}
                       </td>
-                      <td>{p.source === 'crm' ? 'CRM' : 'Server environment'}</td>
+                      <td>{p.source === 'crm' ? 'Saved' : 'Not set up'}</td>
                     </tr>
                   ))}
                 </tbody>

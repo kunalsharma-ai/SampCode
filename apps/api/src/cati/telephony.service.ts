@@ -142,7 +142,7 @@ export class TelephonyService {
     this.provider = p;
   }
 
-  /** Built from Settings > Integrations (or TELEPHONY and TWILIO_*), rebuilt when they change. */
+  /** Built from Settings > Integrations (Twilio with a caller ID), rebuilt when they change. */
   private built?: { fingerprint: string; provider: TelephonyProvider | null };
 
   current(): TelephonyProvider | null {
@@ -151,7 +151,8 @@ export class TelephonyService {
     if (this.built?.fingerprint !== s.fingerprint)
       this.built = {
         fingerprint: s.fingerprint,
-        provider: s.enabled ? new TwilioProvider(s.values.accountSid!, s.values.authToken!, config().TWILIO_API_BASE) : null,
+        provider:
+          s.enabled && s.values.callerId ? new TwilioProvider(s.values.accountSid!, s.values.authToken!, config().TWILIO_API_BASE) : null,
       };
     return this.built.provider;
   }

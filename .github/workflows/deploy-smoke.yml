@@ -32,9 +32,6 @@ jobs:
             echo "RUNTIME_DOMAIN=survey.localhost"
             echo "CAPI_DOMAIN=capi.localhost"
             echo "ACME_EMAIL=ops@example.com"
-            echo "JWT_SECRET=$(openssl rand -hex 32)"
-            echo "SECRETS_KEY=$(openssl rand -hex 32)"
-            echo "SIGNING_KEYS_SECRET=$(openssl rand -hex 32)"
             echo "MONGO_ROOT_USER=root"
             echo "MONGO_ROOT_PASSWORD=$(openssl rand -hex 24)"
             echo "MONGO_APP_USER=sampcode"
@@ -63,6 +60,12 @@ jobs:
           f=$(ls -1t backups/sampcode-*.archive.gz | head -1); test -s "$f"; echo "backup: $f"
           $DC exec -T backup bash -c "mongorestore --uri=\"\$DATABASE_URL\" --gzip --archive=/backups/$(basename "$f") --drop --stopOnError"
           $DC run --rm migrate
+      - name: The secrets SampCode made for itself survive a restart (ADR 0043)
+        run: |
+          $DC exec -T api test -s /run/sampcode-key/secrets_key
+          $DC restart api worker
+          for i in $(seq 1 30); do curl -kfsS https://studio.localhost/api/health && exit 0; sleep 4; done
+          $DC logs --tail 60 api; exit 1
       - if: failure()
         run: $DC ps -a; $DC logs --tail 120
       - if: always()

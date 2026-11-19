@@ -11,11 +11,14 @@ import { PageHeader } from '@/components/neon/PageHeader';
 import { FolderOpen } from 'lucide-react';
 import { useConfirm } from '@/components/neon/ConfirmDialog';
 import { InfoTip } from '@/components/neon/InfoTip';
+import { PROJECT_STATUS_TABS, projectStatusLabel } from '@/components/neon/ProjectsSection';
 
 interface Project {
   id: string;
   name: string;
   client: string | null;
+  status: string;
+  statusSet: string | null;
   surveys: Array<{ id: string; name: string; status: string; updatedAt: string }>;
 }
 
@@ -35,7 +38,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     try {
       setProject(await api<Project>(`/projects/${id}`));
       setVendors(await api<Vendor[]>(`/projects/${id}/vendors`));
-      setDefaults({ ...emptyLayer(), ...(await api<Layer>(`/projects/${id}/redirect-defaults`)) });
+      const d = { ...emptyLayer(), ...(await api<Layer>(`/projects/${id}/redirect-defaults`)) };
+      setDefaults(d);
+      // No default links yet: show the editor straight away so every project gets its own.
+      if (!Object.keys(d.urls).length) setShowDefaults(true);
     } catch (e) {
       setError(e);
     }
@@ -60,8 +66,37 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <ErrorNote error={error} />
       ) : (
         <>
-          <PageHeader icon={FolderOpen} eyebrow="Project" title={project.name} help="page.project">
-            {project.client ? `Client: ${project.client}` : 'No client set'}
+          <PageHeader
+            icon={FolderOpen}
+            eyebrow="Project"
+            title={project.name}
+            help="page.project"
+            actions={
+              <label className="field nx-project-status">
+                Project status
+                <select
+                  value={project.statusSet ?? ''}
+                  disabled={me?.role === 'VIEWER'}
+                  onChange={async (e) => {
+                    try {
+                      setProject(await api<Project>(`/projects/${id}/status`, { method: 'PUT', body: { status: e.target.value || null } }));
+                    } catch (err) {
+                      setError(err);
+                    }
+                  }}
+                >
+                  <option value="">Automatic ({projectStatusLabel(project.status)})</option>
+                  {PROJECT_STATUS_TABS.filter(([k]) => k !== 'ALL').map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            }
+          >
+            {project.client ? `Client: ${project.client}` : 'No client set'} ·{' '}
+            <span className={`badge project-${project.status.toLowerCase()}`}>{projectStatusLabel(project.status)}</span>
           </PageHeader>
           <div className="grid2" style={{ marginTop: 16 }}>
             <section className="panel stack">
@@ -164,7 +199,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 Project redirect defaults
                 <InfoTip k="section.redirectDefaults" />
               </h2>
-              <span className="muted small">Used by direct vendors for any status or word they leave empty.</span>
+              <span className="muted small">
+                This project&apos;s own default redirect links: used by every vendor of the project for any status or word it leaves empty.
+                {defaults && Object.keys(defaults.urls).length ? ` ${Object.keys(defaults.urls).length} link(s) set.` : ' None set yet.'}
+              </span>
               <div style={{ flex: 1 }} />
               <button onClick={() => setShowDefaults(!showDefaults)} aria-expanded={showDefaults}>
                 {showDefaults ? 'Hide' : 'Edit defaults'}

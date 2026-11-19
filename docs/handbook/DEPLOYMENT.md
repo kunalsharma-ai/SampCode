@@ -215,7 +215,7 @@ Rules:
 
 - The backups are on the same disk as the database: **copy `./backups` off the server every day**.
 - Files (exports, media, CAPI photos) are not in the database backup. In production they are in the
-  `files` Docker volume (or S3 with `FILE_STORE=s3`); back that up too (database.md shows how).
+  `files` Docker volume (or S3 with Settings → Integrations → Amazon S3); back that up too (database.md shows how).
 - Practise restores on staging, not on the live database.
 
 Restore drill (local):
@@ -238,19 +238,19 @@ mongosh 'mongodb://localhost:27017/zapx_restore_test?directConnection=true' --ev
 The API refuses to start in production without these (enforced in `apps/api/src/config.ts`):
 
 - `NODE_ENV=production`, `COOKIE_SECURE=true`
-- `JWT_SECRET` (32+ characters, not the example) and its own `SECRETS_KEY` (32+, not `JWT_SECRET`)
-- `SIGNING_KEYS_SECRET` (32+, not `JWT_SECRET` or `SECRETS_KEY`)
+- a usable `SECRETS_KEY` (32+, not an example; `docker-compose.prod.yml` makes one in the `appkey`
+  volume and passes `SECRETS_KEY_FILE`). `JWT_SECRET` and `SIGNING_KEYS_SECRET` are made on the first
+  start and kept in the database (ADR 0043)
 - `CALLBACK_ALLOW_PRIVATE_HOSTS` and `SSO_ALLOW_INSECURE_ISSUER` false
-- `S3_BUCKET` when `FILE_STORE=s3`
 
-With PR #38 the provider keys can instead be entered after the first sign-in under Settings →
-Integrations (the operator organization's administrators or the super admin). With PR #41, make the
+No API key goes in `.env.production` (ADR 0043): every provider key is entered after the first sign-in
+under Settings → Integrations (the operator organization's administrators or the super admin). With PR #41, make the
 first super admin right after the first release:
 `docker compose -f docker-compose.prod.yml --env-file .env.production exec api node apps/api/dist/cli/set-super-admin.js <email>`.
 
 `docker-compose.prod.yml` sets `NODE_ENV`, `COOKIE_SECURE`, the public URLs (from the domains) and
 `TRUST_PROXY_HOPS=1` (Caddy) itself, and defaults `ALLOW_SIGNUP` to false. Behind a CDN, also set
-`EDGE_SHARED_SECRET` and `TRUST_PROXY_HOPS=2`. Full list: [CONFIGURATION.md](CONFIGURATION.md).
+`TRUST_PROXY_HOPS=2` and the CDN shared secret in Settings → Integrations → CDN. Full list: [CONFIGURATION.md](CONFIGURATION.md).
 
 ## 8. Monitoring
 
@@ -286,20 +286,22 @@ Each secret has one job (security review S5), so a rotation has a known effect:
 | `SIGNING_KEYS_SECRET` | Test links already shared stop working; duplicate checks no longer match respondents from before the rotation |
 | `SECRETS_KEY`         | Stored secrets can no longer be decrypted: re-enter them (vendor partner and SSO client secrets, webhooks)    |
 
-After a leak of `JWT_SECRET` alone, rotate only `JWT_SECRET`. Before PR "security hardening"
+`JWT_SECRET` and `SIGNING_KEYS_SECRET` are made by SampCode and kept in the database (ADR 0043); to
+rotate one, set a new value of that name in `.env.production` (an environment value wins) and
+restart the API and worker. After a leak of `JWT_SECRET` alone, rotate only `JWT_SECRET`. Before PR "security hardening"
 (`SIGNING_KEYS_SECRET` unset) `JWT_SECRET` also keyed test links and hashes; setting
 `SIGNING_KEYS_SECRET` the first time has the effect of rotating it.
 
 Regular tasks:
 
-| How often     | Task                                                                                                      |
-| ------------- | --------------------------------------------------------------------------------------------------------- |
-| Every change  | `pnpm check --quick`; one PR per change; update the module guide or ADR when behaviour changes            |
-| Weekly        | Review open Dependabot PRs; `pnpm audit --prod`                                                           |
-| Weekly        | Look at `DEAD` callbacks, `FAILED` jobs and the server's free disk; check the off-server backup copies    |
-| Monthly       | Restore drill; review members and API keys (revoke unused); check AI spend against budgets                |
-| Quarterly     | Rotate `EDGE_SHARED_SECRET`, vendor and webhook secrets; review accepted advisories in `docs/security.md` |
-| Before launch | Size the server for the expected fieldwork; check rate limits for shared interview-centre addresses       |
+| How often     | Task                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| Every change  | `pnpm check --quick`; one PR per change; update the module guide or ADR when behaviour changes             |
+| Weekly        | Review open Dependabot PRs; `pnpm audit --prod`                                                            |
+| Weekly        | Look at `DEAD` callbacks, `FAILED` jobs and the server's free disk; check the off-server backup copies     |
+| Monthly       | Restore drill; review members and API keys (revoke unused); check AI spend against budgets                 |
+| Quarterly     | Rotate the CDN shared secret, vendor and webhook secrets; review accepted advisories in `docs/security.md` |
+| Before launch | Size the server for the expected fieldwork; check rate limits for shared interview-centre addresses        |
 
 Improvements worth planning (details in [SECURITY_REVIEW.md](SECURITY_REVIEW.md)):
 

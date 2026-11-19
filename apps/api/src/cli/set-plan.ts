@@ -1,6 +1,6 @@
 /**
  * Operator command: set an organization's plan (Milestone 8), recorded in the audit log. With billing
- * turned on (BILLING=stripe, Milestone 13) the next Stripe subscription change sets the plan again.
+ * turned on (Stripe in Settings > Integrations, Milestone 13) the next Stripe subscription change sets the plan again.
  *
  *   node apps/api/dist/cli/set-plan.js <organization id | member email> <free|team|business|enterprise>
  */

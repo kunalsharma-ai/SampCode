@@ -1,8 +1,8 @@
 # Billing (Milestone 13)
 
-Billing is optional and **off by default** (`BILLING=off`): plans are then set by an operator with
+Billing is optional and **off by default**: plans are then set by an operator with
 `node apps/api/dist/cli/set-plan.js` ([plans](sso-scim-plans.md#plans-and-limits)). With
-`BILLING=stripe`, an organization's admins buy and manage their plan themselves and Stripe tells
+Settings → Integrations → Stripe, an organization's admins buy and manage their plan themselves and Stripe tells
 SampCode what they pay for. SampCode never sees card details.
 
 Status: tested against a fake Stripe API with real webhook signatures (`apps/api/test/m13.test.ts`),
@@ -18,26 +18,24 @@ cancellation in Stripe's test mode.
    and `customer.subscription.deleted`. Copy its signing secret.
 3. Turn on the customer portal (Billing → Customer portal) and allow plan changes between your
    prices if customers may switch plans themselves.
-4. Configure SampCode:
+4. Configure SampCode in **Settings → Integrations → Stripe** (stored encrypted in the database, ADR 0043):
 
-| Setting                 | Value                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- |
-| `BILLING`               | `stripe`                                                                                                  |
-| `STRIPE_SECRET_KEY`     | A restricted key with write access to Checkout Sessions, Customer portal and read access to Subscriptions |
-| `STRIPE_WEBHOOK_SECRET` | The endpoint's signing secret (`whsec_...`)                                                               |
-| `STRIPE_PRICES`         | `{"team":"price_...","business":"price_..."}`                                                             |
-| `STRIPE_API_VERSION`    | Optional: pin the API version                                                                             |
-| `BILLING_FALLBACK_PLAN` | Plan after a subscription ends (`free`)                                                                   |
+| Field                         | Value                                                                                                     |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Secret key                    | A restricted key with write access to Checkout Sessions, Customer portal and read access to Subscriptions |
+| Webhook signing secret        | The endpoint's signing secret (`whsec_...`)                                                               |
+| Plan prices                   | `{"team":"price_...","business":"price_..."}`                                                             |
+| Stripe API version            | Optional: pin the API version                                                                             |
+| Plan when a subscription ends | `free` unless chosen                                                                                      |
 
-The API refuses to start with `BILLING=stripe` unless the key, the webhook secret and at least one
-price are set.
+Stripe cannot be turned on until the key, the webhook secret and the prices are filled in.
 
 ## How it works
 
-- **Buy:** Settings → Billing lists the plans in `STRIPE_PRICES`. Choosing one opens Stripe
+- **Buy:** Settings → Billing lists the plans that have a price. Choosing one opens Stripe
   Checkout for a subscription, tied to the organization (`client_reference_id` and subscription
   metadata). The plan does not change when the admin returns; it changes when Stripe confirms.
-- **Webhooks** are checked against `STRIPE_WEBHOOK_SECRET` (HMAC-SHA256 over the raw body, 5 minute
+- **Webhooks** are checked against the webhook signing secret (HMAC-SHA256 over the raw body, 5 minute
   tolerance) and applied once (`BillingEvent`). For every subscription event SampCode reads the
   subscription back from Stripe, so late or out-of-order events cannot set an old state.
 - **Statuses:** `active` and `trialing` give the paid plan. `past_due` keeps it while Stripe retries

@@ -14,11 +14,7 @@ const ports = vi.hoisted(() => {
   process.env.ALLOW_SIGNUP = 'true';
   process.env.CALLBACK_WORKER = 'off';
   process.env.CALLBACK_ALLOW_PRIVATE_HOSTS = 'true';
-  process.env.SAMPLEON_URL = `http://127.0.0.1:${port}`;
-  process.env.SAMPLEON_CLIENT_ID = 'zapx';
-  process.env.SAMPLEON_CLIENT_SECRET = 'zapx-client-secret-at-sampleon';
-  process.env.SAMPLEON_OUTCOME_SECRET = 'zapx-outcome-secret-at-sampleon';
-  return { port };
+  return { port, url: `http://127.0.0.1:${port}` };
 });
 
 import { createHash, createHmac, randomUUID } from 'node:crypto';
@@ -28,6 +24,7 @@ import { join } from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp, type ApiApp } from '../src/http/app';
+import { clearIntegrations, saveIntegration } from './support/integrations';
 import { PrismaService } from '../src/common/prisma.service';
 import { CallbackWorker } from '../src/integrations/callback.worker';
 
@@ -129,6 +126,13 @@ beforeAll(async () => {
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
   worker = app.get(CallbackWorker);
+  // SampAudience is set up in Settings > Integrations (ADR 0043).
+  await saveIntegration(prisma, 'sampleon', {
+    url: ports.url,
+    clientId: 'zapx',
+    clientSecret: 'zapx-client-secret-at-sampleon',
+    outcomeSecret: 'zapx-outcome-secret-at-sampleon',
+  });
 
   const reg = await http
     .post('/api/auth/register')
@@ -142,6 +146,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (prisma) await clearIntegrations(prisma, 'sampleon');
   await app?.close();
   await new Promise((r) => mock?.close(r));
 });
@@ -239,7 +244,7 @@ describe('respondents SAMPLEON sends in', () => {
 
   it('returns the browser to SAMPLEON and confirms the outcome with a signed S2S call', async () => {
     const st = await finish('ses_CARDIO1');
-    expect(st.redirectUrl).toBe(`${process.env.SAMPLEON_URL}/r/complete?token=ses_CARDIO1`);
+    expect(st.redirectUrl).toBe(`${ports.url}/r/complete?token=ses_CARDIO1`);
     const tenantId = (await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).tenantId;
     await prisma.outboundCallback.updateMany({
       where: { state: 'PENDING', tenantId: { not: tenantId } },
