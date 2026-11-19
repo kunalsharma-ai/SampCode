@@ -143,6 +143,7 @@ describe('who can manage integrations', () => {
       'ipinfo',
       'deepgram',
       'twilio',
+      'smtp',
       'sendgrid',
       'stripe',
       's3',

@@ -162,7 +162,7 @@ export function EmailInvitations({ surveyId, readOnly, live }: { surveyId: strin
       {contacts && !contacts.emailEnabled ? (
         <p className="note small" role="status" data-testid="email-off">
           Email sending is off, so scheduled waves wait and nothing is sent. An administrator can turn it on in Settings › Integrations ›
-          SendGrid. Meanwhile, download a wave&apos;s personal links and send them with your own email tool.
+          SMTP email (Zoho Mail) or SendGrid. Meanwhile, download a wave&apos;s personal links and send them with your own email tool.
         </p>
       ) : null}
       {contacts && !contacts.smsEnabled ? (

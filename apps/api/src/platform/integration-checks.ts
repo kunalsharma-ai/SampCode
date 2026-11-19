@@ -7,6 +7,7 @@
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { sampledgeServiceHeaders } from '@zapx/redirect-core';
 import { config } from '../config';
+import { smtpErrorText, smtpSettings, smtpTransport } from '../distribution/mailer';
 import type { IntegrationKey } from './integrations';
 
 export interface CheckResult {
@@ -84,6 +85,23 @@ const CHECKS: Record<IntegrationKey, Checker> = {
         ? `Connected. ${v.callerId} is a number on this account.`
         : `Connected. ${v.callerId} is not a number on this account; it works only if it is a verified caller ID in Twilio.`,
     };
+  },
+
+  async smtp(v) {
+    // Connects, starts TLS and signs in; nothing is sent.
+    const s = smtpSettings(v);
+    const transport = smtpTransport(s);
+    try {
+      await transport.verify();
+      return {
+        ok: true,
+        message: `Connected to ${s.host}:${s.port} (${s.secure ? 'SSL/TLS' : 'STARTTLS'}) and signed in as ${s.user}. Emails will come from that address.`,
+      };
+    } catch (e) {
+      return { ok: false, message: smtpErrorText(e) };
+    } finally {
+      transport.close();
+    }
   },
 
   async sendgrid(v) {

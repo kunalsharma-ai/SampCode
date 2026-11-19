@@ -19,10 +19,21 @@
 import { z } from 'zod';
 import { config, type AppConfig } from '../config';
 
+export const INTEGRATION_KEYS = [
+  'anthropic',
+  'ipinfo',
+  'deepgram',
+  'twilio',
+  'smtp',
+  'sendgrid',
+  'stripe',
+  's3',
+  'sampleon',
+  'cdn',
+] as const;
 /** Model used when none is chosen in the CRM. */
 export const DEFAULT_AI_MODEL = 'claude-opus-5-5';
 
-export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 export const isIntegrationKey = (k: string): k is IntegrationKey => (INTEGRATION_KEYS as readonly string[]).includes(k);
 
@@ -81,6 +92,22 @@ const json = (schema: z.ZodType, example: string) => (v: string) => {
 };
 const pattern = (re: RegExp, message: string) => (v: string) => (re.test(v) ? null : message);
 const maxLen = (n: number) => (v: string) => (v.length <= n ? null : `must be at most ${n} characters`);
+
+/** Zoho Mail (India data centre, organization accounts) over SSL/TLS: the transport Kunal asked for. */
+export const SMTP_DEFAULTS = { host: 'smtppro.zoho.in', port: '465', security: 'ssl' } as const;
+
+/**
+ * The SMTP server must be a public DNS name. IP addresses and local names are refused so that Settings >
+ * Integrations cannot be used to make the server connect to machines on its own network (tests use
+ * SMTP_TEST_ENDPOINT instead).
+ */
+function smtpHostProblem(v: string): string | null {
+  const host = v.trim().toLowerCase();
+  if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/.test(host))
+    return 'must be a server name such as smtppro.zoho.in';
+  if (/(^|\.)(localhost|local|internal|localdomain|home|lan)$/.test(host)) return 'must be a public server name';
+  return null;
+}
 
 export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
   anthropic: {
@@ -222,6 +249,66 @@ export const INTEGRATIONS: Record<IntegrationKey, IntegrationDef> = {
         check: pattern(/^https?:\/\/[^/\s]+(\/\S*)?$/, 'must be a URL'),
       },
     ],
+  },
+  smtp: {
+    key: 'smtp',
+    name: 'SMTP email (Zoho Mail)',
+    category: 'Email and SMS',
+    purpose:
+      'Email invitations and reminders, "forgot password" emails and automation emails, sent through your own mailbox over SMTP. Set up for Zoho Mail; any SMTP server works. Used instead of SendGrid when both are on.',
+    privacy: "Recipients' email addresses and the email text are sent to your SMTP server (Zoho Mail by default).",
+    signupUrl: 'https://www.zoho.com/mail/help/zoho-smtp.html',
+    fields: [
+      {
+        name: 'host',
+        label: 'SMTP server',
+        help: 'smtppro.zoho.in for Zoho Mail organization accounts in India (smtppro.zoho.com elsewhere, smtp.zoho.in for personal accounts).',
+        placeholder: 'smtppro.zoho.in',
+        fallback: () => SMTP_DEFAULTS.host,
+        check: (v) => smtpHostProblem(v),
+      },
+      {
+        name: 'port',
+        label: 'Port',
+        kind: 'select',
+        options: ['465', '587'],
+        help: "465 with SSL/TLS (Zoho's default), or 587 with STARTTLS.",
+        fallback: () => SMTP_DEFAULTS.port,
+        check: (v) => (['465', '587'].includes(v) ? null : 'must be 465 or 587'),
+      },
+      {
+        name: 'security',
+        label: 'Encryption',
+        kind: 'select',
+        options: ['ssl', 'starttls'],
+        help: 'ssl: SSL/TLS from the first byte (secure: true, port 465). starttls: upgraded to TLS after connecting (port 587). Both are always encrypted.',
+        fallback: () => SMTP_DEFAULTS.security,
+        check: (v) => (v === 'ssl' || v === 'starttls' ? null : 'must be ssl or starttls'),
+      },
+      {
+        name: 'user',
+        label: 'Sender email (SMTP user)',
+        help: 'The mailbox that signs in to the SMTP server. Emails are sent from this address.',
+        required: true,
+        placeholder: 'surveys@yourcompany.com',
+        check: pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, 'is not an email address'),
+      },
+      {
+        name: 'password',
+        label: 'Password',
+        help: 'For Zoho, an application-specific password (Zoho Accounts > Security > App passwords) when two-factor sign-in is on.',
+        secret: true,
+        required: true,
+        check: maxLen(300),
+      },
+      {
+        name: 'fromName',
+        label: 'From name',
+        fallback: () => 'SampCode surveys',
+        check: maxLen(100),
+      },
+    ],
+    validate: (v) => ((v.port === '465') === (v.security === 'ssl') ? null : 'Use port 465 with ssl, or port 587 with starttls.'),
   },
   sendgrid: {
     key: 'sendgrid',

@@ -48,5 +48,6 @@ they are accepted; a later record supersedes an earlier one.
 | [0041](0041-express.md)                          | Plain Express replaces NestJS: route functions, one composition root       | Accepted                                               |
 | [0042](0042-docker-compose-deployment.md)        | Production on Docker Compose with Caddy; Terraform and AWS removed         | Accepted                                               |
 | [0043](0043-api-keys-in-the-database.md)         | Every API key in the database; only database settings in the environment   | Accepted                                               |
+| [0044](0044-smtp-email-zoho.md)                  | Email over SMTP (nodemailer, Zoho Mail by default), set up in the database | Accepted                                               |
 
 Template: copy an existing record; sections are Context, Decision, Consequences.
