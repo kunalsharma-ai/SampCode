@@ -41,7 +41,7 @@ test('integrations are set up in the CRM by the operator only', async ({ page, b
   await page.goto('/settings');
   await page.getByTestId('integrations-link').click();
   await expect(page.getByRole('heading', { name: 'Integrations' })).toBeVisible();
-  for (const key of ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'])
+  for (const key of ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'smtp', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'])
     await expect(page.getByTestId(`integration-${key}`)).toBeVisible();
 
   const ipinfo = page.getByTestId('integration-ipinfo');

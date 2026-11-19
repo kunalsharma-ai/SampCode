@@ -100,6 +100,15 @@ const schema = z
     /** Only for tests: a SendGrid-compatible stand-in. Email is set up in Settings > Integrations. */
     SENDGRID_API_BASE: z.string().url().default('https://api.sendgrid.com'),
     /**
+     * Only for tests: a local SMTP stand-in such as smtp://127.0.0.1:2525 (plain, no TLS). When set it
+     * replaces the server, port and encryption saved for SMTP email; the sender and password still come
+     * from Settings > Integrations. Never set it in production.
+     */
+    SMTP_TEST_ENDPOINT: z
+      .string()
+      .regex(/^smtp:\/\/[^/\s:]+:[0-9]{1,5}$/, 'must look like smtp://127.0.0.1:2525')
+      .optional(),
+    /**
      * Blueprint phase 5, data residency: the region this deployment keeps data in (e.g. "eu", "us",
      * "in"). An organization that sets its own region sees a warning when the two differ. Empty: not declared.
      */
@@ -189,6 +198,9 @@ const schema = z
       ctx.addIssue({ code: 'custom', path: ['SIGNING_KEYS_SECRET'], message: 'must be its own random value' });
     if (c.NODE_ENV === 'production' && c.CALLBACK_ALLOW_PRIVATE_HOSTS) {
       ctx.addIssue({ code: 'custom', path: ['CALLBACK_ALLOW_PRIVATE_HOSTS'], message: 'must be false in production' });
+    }
+    if (c.NODE_ENV === 'production' && c.SMTP_TEST_ENDPOINT) {
+      ctx.addIssue({ code: 'custom', path: ['SMTP_TEST_ENDPOINT'], message: 'is only for tests; remove it in production' });
     }
     if (c.NODE_ENV === 'production' && c.SSO_ALLOW_INSECURE_ISSUER) {
       ctx.addIssue({ code: 'custom', path: ['SSO_ALLOW_INSECURE_ISSUER'], message: 'must be false in production' });

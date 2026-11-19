@@ -27,17 +27,18 @@ with `SECRETS_KEY` ([ADR 0035](../adr/0035-integrations-in-the-crm.md),
 the variables that used to hold them (listed in `RETIRED_ENV`, `apps/api/src/platform/installation-secrets.ts`)
 are ignored, and the API logs a warning naming any that are still set.
 
-| Integration (key)         | Fields                                                                                       |
-| ------------------------- | -------------------------------------------------------------------------------------------- |
-| Claude AI (`anthropic`)   | API key, default model, models per task (architect, translate, insights), price table        |
-| IPinfo (`ipinfo`)         | access token                                                                                 |
-| Deepgram (`deepgram`)     | API key, model                                                                               |
-| Twilio (`twilio`)         | account SID, auth token, caller ID (phone dialer), SMS sender, callback address              |
-| SendGrid (`sendgrid`)     | API key, from address, from name                                                             |
-| Stripe (`stripe`)         | secret key, webhook signing secret, plan prices, API version, plan after a subscription ends |
-| Amazon S3 (`s3`)          | bucket, region, folder, KMS key, access key ID and secret (outside AWS)                      |
-| SampAudience (`sampleon`) | address, client ID, client secret, outcome secret                                            |
-| CDN (`cdn`)               | shared secret sent as `X-Zapx-Edge`, viewer address header                                   |
+| Integration (key)         | Fields                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Claude AI (`anthropic`)   | API key, default model, models per task (architect, translate, insights), price table                                          |
+| IPinfo (`ipinfo`)         | access token                                                                                                                   |
+| Deepgram (`deepgram`)     | API key, model                                                                                                                 |
+| Twilio (`twilio`)         | account SID, auth token, caller ID (phone dialer), SMS sender, callback address                                                |
+| SMTP email (`smtp`)       | server (default `smtppro.zoho.in`), port (465/587), encryption (ssl/starttls), sender, password, from name; wins over SendGrid |
+| SendGrid (`sendgrid`)     | API key, from address, from name                                                                                               |
+| Stripe (`stripe`)         | secret key, webhook signing secret, plan prices, API version, plan after a subscription ends                                   |
+| Amazon S3 (`s3`)          | bucket, region, folder, KMS key, access key ID and secret (outside AWS)                                                        |
+| SampAudience (`sampleon`) | address, client ID, client secret, outcome secret                                                                              |
+| CDN (`cdn`)               | shared secret sent as `X-Zapx-Edge`, viewer address header                                                                     |
 
 Rules: an integration is on only when it is switched on in the CRM and its required fields are filled
 in. A field left empty uses its default where it has one (for example the Twilio callback address),
@@ -127,10 +128,11 @@ example; `CALLBACK_ALLOW_PRIVATE_HOSTS=true`; or `SSO_ALLOW_INSECURE_ISSUER=true
 
 ### Phone, email and SMS
 
-| Variable                                    | Purpose                  | Default                                        |
-| ------------------------------------------- | ------------------------ | ---------------------------------------------- |
-| `TWILIO_API_BASE`, `TELEPHONY_RING_SECONDS` | endpoint and ring time   | `https://api.twilio.com`, `30`                 |
-| `SENDGRID_API_BASE` _(PR #32)_              | endpoint and sender name | `https://api.sendgrid.com`, `SampCode surveys` |
+| Variable                                      | Purpose                                                                        | Default                                        |
+| --------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `TWILIO_API_BASE`, `TELEPHONY_RING_SECONDS`   | endpoint and ring time                                                         | `https://api.twilio.com`, `30`                 |
+| `SENDGRID_API_BASE` _(PR #32)_                | endpoint and sender name                                                       | `https://api.sendgrid.com`, `SampCode surveys` |
+| `SMTP_TEST_ENDPOINT` _(tests only, ADR 0044)_ | local plain-SMTP stand-in, e.g. `smtp://127.0.0.1:2525`; refused in production | not set                                        |
 
 ### Background work, files and callbacks
 
