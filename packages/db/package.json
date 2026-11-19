@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@prisma/client": "6.10.1",
-    "bcryptjs": "3.0.2",
-    "pg": "8.16.3"
+    "bcryptjs": "3.0.3",
+    "pg": "8.23.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.5",
-    "@types/pg": "8.15.4",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
     "dotenv-cli": "8.0.0",
     "prisma": "6.10.1",
     "typescript": "5.8.3"
