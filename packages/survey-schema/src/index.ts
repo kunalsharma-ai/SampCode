@@ -92,7 +92,24 @@ const baseQuestion = {
   validations: z.array(validationRule).default([]),
   /** Image, video or audio shown above the answers. */
   media: questionMediaSchema.optional(),
+  /**
+   * Custom HTML for the question text (client feedback 2026-11). Rendered through a strict allow-list
+   * (formatting, lists, tables, line breaks; no scripts, links, forms, frames or external images),
+   * with piped answers escaped. The plain `text` stays the accessible name, the translation source
+   * and the fallback where HTML cannot be rendered.
+   */
+  html: z.string().max(20000).optional(),
+  /** The question library type this question was created from (e.g. `likert`, `nps`); see QUESTION_CATALOG. */
+  catalogType: z.string().max(60).optional(),
 };
+
+/** An answer outside the normal answers ("Don't know", "Prefer not to say"), stored as its own code. */
+export const dontKnowSchema = z.object({ code: z.number().int(), label: z.string().min(1).max(200) });
+export type DontKnow = z.infer<typeof dontKnowSchema>;
+
+/** Open text formats: how the answer box looks and what it accepts. */
+export const OPEN_FORMATS = ['text', 'email', 'phone', 'date', 'time', 'datetime', 'location'] as const;
+export type OpenFormat = (typeof OPEN_FORMATS)[number];
 
 export const singleQuestionSchema = z.object({
   ...baseQuestion,
@@ -100,6 +117,8 @@ export const singleQuestionSchema = z.object({
   options: z.array(optionSchema).min(1),
   randomize: z.boolean().default(false),
   optionsFrom: optionsFromSchema.optional(),
+  /** list: radio buttons (default); dropdown: a select box. */
+  display: z.enum(['list', 'dropdown']).optional(),
 });
 
 export const multiQuestionSchema = z.object({
@@ -110,6 +129,8 @@ export const multiQuestionSchema = z.object({
   optionsFrom: optionsFromSchema.optional(),
   minSelected: z.number().int().min(0).optional(),
   maxSelected: z.number().int().min(1).optional(),
+  /** list: checkboxes (default); dropdown: a compact multi-select dropdown. */
+  display: z.enum(['list', 'dropdown']).optional(),
 });
 
 export const openQuestionSchema = z.object({
@@ -117,6 +138,10 @@ export const openQuestionSchema = z.object({
   type: z.literal('open'),
   multiline: z.boolean().default(false),
   maxLength: z.number().int().min(1).max(10000).default(2000),
+  /** What the box accepts: free text (default), an email address, a phone number, a date, a time or both. */
+  format: z.enum(OPEN_FORMATS).optional(),
+  /** Exclusive answer instead of typing ("Don't know"), stored as its code. */
+  dontKnow: dontKnowSchema.optional(),
 });
 
 export const numericQuestionSchema = z.object({
@@ -132,6 +157,8 @@ export const numericQuestionSchema = z.object({
   /** Slider end labels. */
   minLabel: z.string().max(200).optional(),
   maxLabel: z.string().max(200).optional(),
+  /** Exclusive answer instead of a number ("Don't know"), stored as its code (pick one outside min-max). */
+  dontKnow: dontKnowSchema.optional(),
 });
 
 /** Rating scale or NPS: one whole number between min and max, shown as a row of buttons. */
@@ -145,7 +172,9 @@ export const scaleQuestionSchema = z.object({
   /** Net Promoter Score: 0-10, analysis reports promoters (9-10), passives and detractors (0-6). */
   nps: z.boolean().default(false),
   /** An answer outside the scale, such as "Don't know", stored as its own code. */
-  dontKnow: optionSchema.pick({ code: true, label: true }).optional(),
+  dontKnow: dontKnowSchema.optional(),
+  /** buttons: a row of numbered buttons (default); stars: star rating. */
+  display: z.enum(['buttons', 'stars']).optional(),
 });
 
 /** Ranking: put the options in order. Stored as the codes in rank order (first = rank 1). */
@@ -413,6 +442,8 @@ export const infoElementSchema = z.object({
   text: z.string().min(1),
   condition: expression.optional(),
   media: questionMediaSchema.optional(),
+  html: z.string().max(20000).optional(),
+  catalogType: z.string().max(60).optional(),
 });
 
 export const questionSchema = z.discriminatedUnion('type', [
@@ -967,6 +998,7 @@ export function defaultPresentation(): Presentation {
   return presentationSchema.parse({});
 }
 export * from './templates.js';
+export * from './catalog.js';
 
 /** Languages written right to left (by primary subtag). */
 const RTL_LANGUAGES = new Set(['ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'iw', 'ks', 'ku', 'pa-arab', 'ps', 'sd', 'syr', 'ug', 'ur', 'yi']);

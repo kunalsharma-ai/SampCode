@@ -6,15 +6,20 @@ export abstract class SecretBox {
   abstract open(sealed: string): string;
 }
 
+/** The AES key derived from a master secret (SECRETS_KEY, or JWT_SECRET in development). */
+export const secretBoxKey = (master: string) => createHash('sha256').update(`zapx-secret-box:${master}`).digest();
+
 export class LocalSecretBox extends SecretBox {
   private readonly key: Buffer;
 
-  constructor() {
+  /** `master` is for code that runs before the configuration can be read (installation-secrets.ts). */
+  constructor(master?: string) {
     super();
-    const cfg = config();
-    this.key = createHash('sha256')
-      .update(`zapx-secret-box:${cfg.SECRETS_KEY ?? cfg.JWT_SECRET}`)
-      .digest();
+    if (master) this.key = secretBoxKey(master);
+    else {
+      const cfg = config();
+      this.key = secretBoxKey(cfg.SECRETS_KEY ?? cfg.JWT_SECRET);
+    }
   }
 
   seal(plain: string): string {

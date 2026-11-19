@@ -14,7 +14,6 @@ vi.hoisted(() => {
   process.env.CALLBACK_WORKER = 'off';
   process.env.CALLBACK_ALLOW_PRIVATE_HOSTS = 'true';
   process.env.AI_BREAKER_FAILURES = '2';
-  process.env.AI_PRICING = JSON.stringify({ 'fake-model': { input: 4, output: 20 } });
 });
 
 import { createHmac } from 'node:crypto';
@@ -32,6 +31,7 @@ import { isPrivateAddress } from '../src/integrations/http-delivery';
 import { AiError, AiProvider, type ArchitectRequest, type ArchitectResult, type TranslateResult } from '../src/ai/ai-provider';
 import { redactPii } from '../src/ai/redact';
 import { costMicroUsd } from '../src/ai/ai-gateway';
+import { clearIntegrations, saveIntegration } from './support/integrations';
 
 const demo = JSON.parse(readFileSync(join(__dirname, '../../../docs/examples/demo-screener.json'), 'utf8'));
 const run = `m4${Date.now().toString(36)}`;
@@ -192,6 +192,8 @@ beforeAll(async () => {
   http = request(app.getHttpServer());
   prisma = app.get(PrismaService);
   worker = app.get(CallbackWorker);
+  // The price table comes from Settings > Integrations > Claude (saved, not switched on: the fake provider answers).
+  await saveIntegration(prisma, 'anthropic', { pricing: JSON.stringify({ 'fake-model': { input: 4, output: 20 } }) }, false);
 
   auth = await signup('admin');
   projectId = (await http.post('/api/projects').set(auth).send({ name: 'Integrations' }).expect(201)).body.id;
@@ -201,6 +203,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (prisma) await clearIntegrations(prisma, 'anthropic');
   await app?.close();
   await new Promise((r) => mock?.close(r));
 });

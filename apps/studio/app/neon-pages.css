@@ -581,3 +581,195 @@ button.nx-info:focus-visible {
   gap: 8px;
   margin: -4px 0 12px;
 }
+
+/* ---- Client feedback 2026-11: editor alignment and responsive layout ----
+   A fieldset's default min-width is its content's min-content width, so a wide answer table or a row
+   of buttons pushed the question card under the logic check. Grid children and fieldsets may shrink;
+   wide tables scroll inside their card instead. */
+fieldset {
+  min-width: 0;
+}
+.editor > *,
+.editor .panel {
+  min-width: 0;
+}
+.editor .panel {
+  overflow-wrap: anywhere;
+}
+.editor table.data.list-editor {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.editor .row {
+  flex-wrap: wrap;
+}
+.editor .q-head h2 {
+  flex-wrap: wrap;
+}
+.editor input,
+.editor select,
+.editor textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+/* Three columns (outline, question, logic check) need room: below 1400px the logic check sits on top. */
+@media (max-width: 1400px) {
+  .editor:has(> [data-testid='logic-report']) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .editor > [data-testid='logic-report'] {
+    order: -1;
+  }
+}
+@media (max-width: 720px) {
+  .editor .q-head > button {
+    flex: 1 1 auto;
+  }
+}
+.special-options .field input {
+  min-width: 180px;
+}
+.paste-options,
+.html-editor {
+  border-style: dashed;
+}
+.html-preview {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2, transparent);
+}
+.zx-html table {
+  border-collapse: collapse;
+}
+.zx-html td,
+.zx-html th {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+/* Question library dialog */
+.q-library {
+  width: min(980px, 100%);
+  max-height: min(86vh, 900px);
+}
+.q-library-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.q-library-scroll h3 {
+  margin: 16px 0 6px;
+}
+
+/* Question preview tab: the whole window */
+.preview-tab {
+  min-height: 100vh;
+  padding: 16px clamp(12px, 3vw, 40px);
+  box-sizing: border-box;
+}
+.preview-tab-bar {
+  margin-bottom: 12px;
+  gap: 10px;
+}
+.preview-full .preview-frame {
+  min-height: calc(100vh - 140px);
+}
+
+/* Dashboard: recent surveys as a small box in the right rail */
+.nx-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.nx-recent-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+}
+.nx-recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.nx-recent-meta {
+  grid-column: 1 / -1;
+}
+
+/* Projects: status tabs and sort (client feedback 2026-11) */
+.nx-project-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.nx-status-tabs {
+  flex: 1 1 520px;
+  min-width: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+.nx-status-tabs button {
+  white-space: nowrap;
+}
+.nx-tab-count {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.nx-sort {
+  flex: 0 0 auto;
+}
+.badge.project-running {
+  background: color-mix(in srgb, #16a34a 18%, transparent);
+}
+.badge.project-paused {
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+}
+.badge.project-completed {
+  background: color-mix(in srgb, #64748b 22%, transparent);
+}
+.badge.project-approved {
+  background: color-mix(in srgb, #2563eb 18%, transparent);
+}
+.badge.project-under_approval {
+  background: color-mix(in srgb, #a855f7 18%, transparent);
+}
+
+/* Full-page survey builder (client feedback 2026-11): menu and top bar hidden; the survey's section
+   tabs stay on top while the page header scrolls away. */
+html.nx-full-page .nx-app {
+  grid-template-columns: minmax(0, 1fr);
+}
+html.nx-full-page .nx-sidebar,
+html.nx-full-page .nx-topbar {
+  display: none;
+}
+.nx-sticky-tabs {
+  position: sticky;
+  /* Under the sticky top bar; at the very top in full-page mode. */
+  top: 62px;
+  z-index: 20;
+  background: var(--q-surface, var(--panel, #fff));
+  backdrop-filter: blur(10px);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+html.nx-full-page .nx-sticky-tabs {
+  top: 0;
+}
+.nx-published {
+  border-color: color-mix(in srgb, #16a34a 45%, var(--q-border));
+  margin-bottom: 12px;
+}
+.sa-credentials {
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--q-accent) 50%, var(--q-border));
+  border-radius: 12px;
+}

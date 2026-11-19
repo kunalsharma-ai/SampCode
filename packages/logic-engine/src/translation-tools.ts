@@ -122,3 +122,113 @@ export function glossaryFor(texts: string[], glossary: GlossaryTerm[]): Glossary
   const all = texts.join('\n').toLowerCase();
   return glossary.filter((g) => g.source.trim() && all.includes(g.source.toLowerCase()));
 }
+
+// ---- Translation sheet (client feedback 2026-11) ------------------------------------------------
+// A spreadsheet with every text side by side: the existing (source) text on the left and an empty
+// column on the right for the translator. Uploaded back, the right column becomes the translation.
+
+export const SHEET_HEADERS = ['Key', 'Where', 'Existing text', 'Translation'] as const;
+
+const csvCell = (v: string) => (/[",\r\n]/.test(v) || /^\s|\s$/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+/** CSV (UTF-8 with a byte order mark, so Excel opens it correctly) of every text of a language. */
+export function translationSheetCsv(def: SurveyDefinition, presentation: Presentation, tag: string): string {
+  const lang = presentation.languages.find((l) => l.tag === tag);
+  const rows = textKeys(def, presentation).map((k) => {
+    const e = lang?.texts[k.key];
+    const current = e && e.source === k.source ? e.text : '';
+    return [k.key, k.context, k.source, current];
+  });
+  return `\uFEFF${[[...SHEET_HEADERS], ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`;
+}
+
+/** Parse CSV (comma, semicolon or tab separated, as Excel writes it in different regions). */
+export function parseCsv(text: string): string[][] {
+  const src = text.replace(/^\uFEFF/, '');
+  const firstLine = src.split(/\r?\n/, 1)[0] ?? '';
+  const sep = [',', ';', '\t'].reduce((best, c) => (firstLine.split(c).length > firstLine.split(best).length ? c : best), ',');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"' && cell === '') quoted = true;
+    else if (ch === sep) {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && src[i + 1] === '\n') i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += ch;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}
+
+export interface SheetResult {
+  presentation: Presentation;
+  /** Texts filled or changed. */
+  applied: number;
+  /** Rows whose key is not a text of this survey (any more). */
+  unknown: string[];
+  /** Rows left empty in the translation column. */
+  empty: number;
+}
+
+/**
+ * Put an uploaded translation sheet into a language. Rows are matched by key; an empty translation
+ * cell leaves the text as it was. Uploaded texts count as reviewed: a person wrote them.
+ */
+export function applyTranslationSheet(def: SurveyDefinition, presentation: Presentation, tag: string, csv: string): SheetResult {
+  const rows = parseCsv(csv);
+  if (!rows.length) throw new Error('The file is empty.');
+  const header = rows[0]!.map((h) => h.trim().toLowerCase());
+  const keyCol = header.indexOf('key');
+  const trCol = header.findIndex((h) => h === 'translation' || h === 'translated text' || h === 'new text');
+  if (keyCol < 0 || trCol < 0)
+    throw new Error('The sheet needs a "Key" column and a "Translation" column (download the sheet to start from).');
+  const keys = new Map(textKeys(def, presentation).map((k) => [k.key, k.source]));
+  const lang = presentation.languages.find((l) => l.tag === tag);
+  if (!lang) throw new Error('Add the language first.');
+  const texts = { ...lang.texts };
+  const unknown: string[] = [];
+  let applied = 0;
+  let empty = 0;
+  for (const r of rows.slice(1)) {
+    const key = (r[keyCol] ?? '').trim();
+    const text = (r[trCol] ?? '').trim();
+    if (!key) continue;
+    const source = keys.get(key);
+    if (source === undefined) {
+      unknown.push(key);
+      continue;
+    }
+    if (!text) {
+      empty++;
+      continue;
+    }
+    const before = texts[key];
+    if (before && before.text === text && before.source === source && before.status === 'reviewed') continue;
+    texts[key] = { text, source, status: 'reviewed' };
+    applied++;
+  }
+  return {
+    presentation: { ...presentation, languages: presentation.languages.map((l) => (l.tag === tag ? { ...l, texts } : l)) },
+    applied,
+    unknown,
+    empty,
+  };
+}

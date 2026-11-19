@@ -69,18 +69,18 @@ wins over the environment variable in the "Switch" column, which stays as a fall
 re-reads the saved values every `INTEGRATIONS_REFRESH_MS` (15 s). SendGrid, SSO and PROJEXA are not
 part of it.
 
-| Service                    | Used for                                         | Switch                               | Code                                                  |
-| -------------------------- | ------------------------------------------------ | ------------------------------------ | ----------------------------------------------------- |
-| Anthropic Claude           | AI architect, AI translation, research assistant | `ANTHROPIC_API_KEY` + `AI_MODEL`     | `apps/api/src/ai/claude.provider.ts`                  |
-| AWS S3 (+ KMS)             | file storage                                     | `FILE_STORE=s3`                      | `apps/api/src/jobs/file-store.ts`                     |
-| OpenID Connect / SAML IdP  | single sign-on                                   | per organization in Settings         | `apps/api/src/auth/sso.service.ts`, `saml.service.ts` |
-| Stripe                     | plan billing                                     | `BILLING=stripe`                     | `apps/api/src/plans/billing.service.ts`               |
-| IPinfo                     | VPN / proxy / data-centre check                  | `NETWORK_REPUTATION=ipinfo`          | `apps/api/src/quality/network-reputation.service.ts`  |
-| Deepgram                   | transcripts of recordings                        | `TRANSCRIPTION=deepgram`             | `apps/api/src/captures/transcription.service.ts`      |
-| Twilio Voice               | CATI dialer and call recording                   | `TELEPHONY=twilio`                   | `apps/api/src/cati/telephony.service.ts`              |
-| Twilio Messages _(PR #34)_ | SMS invitations                                  | `SMS_PROVIDER=twilio`                | `apps/api/src/distribution/sms.ts`                    |
-| SendGrid _(PR #32)_        | email invitations and automation emails          | `EMAIL_PROVIDER=sendgrid`            | `apps/api/src/distribution/mailer.ts`                 |
-| PROJEXA                    | partner redirect and S2S outcome contract        | per vendor (`integration = PROJEXA`) | `packages/redirect-core/src/adapters.ts`              |
+| Service                    | Used for                                         | Switch                                         | Code                                                  |
+| -------------------------- | ------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------- |
+| Anthropic Claude           | AI architect, AI translation, research assistant | Settings → Integrations → Claude               | `apps/api/src/ai/claude.provider.ts`                  |
+| AWS S3 (+ KMS)             | file storage                                     | Settings → Integrations → Amazon S3            | `apps/api/src/jobs/file-store.ts`                     |
+| OpenID Connect / SAML IdP  | single sign-on                                   | per organization in Settings                   | `apps/api/src/auth/sso.service.ts`, `saml.service.ts` |
+| Stripe                     | plan billing                                     | Settings → Integrations → Stripe               | `apps/api/src/plans/billing.service.ts`               |
+| IPinfo                     | VPN / proxy / data-centre check                  | Settings → Integrations → IPinfo               | `apps/api/src/quality/network-reputation.service.ts`  |
+| Deepgram                   | transcripts of recordings                        | Settings → Integrations → Deepgram             | `apps/api/src/captures/transcription.service.ts`      |
+| Twilio Voice               | CATI dialer and call recording                   | Settings → Integrations → Twilio               | `apps/api/src/cati/telephony.service.ts`              |
+| Twilio Messages _(PR #34)_ | SMS invitations                                  | a Twilio SMS sender in Settings → Integrations | `apps/api/src/distribution/sms.ts`                    |
+| SendGrid _(PR #32)_        | email invitations and automation emails          | Settings → Integrations → SendGrid             | `apps/api/src/distribution/mailer.ts`                 |
+| PROJEXA                    | partner redirect and S2S outcome contract        | per vendor (`integration = PROJEXA`)           | `packages/redirect-core/src/adapters.ts`              |
 
 ## 2. The big picture
 
