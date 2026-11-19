@@ -34,7 +34,6 @@ export const INTEGRATION_KEYS = [
 /** Model used when none is chosen in the CRM. */
 export const DEFAULT_AI_MODEL = 'claude-opus-5-5';
 
-export const INTEGRATION_KEYS = ['anthropic', 'ipinfo', 'deepgram', 'twilio', 'sendgrid', 'stripe', 's3', 'sampleon', 'cdn'] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 export const isIntegrationKey = (k: string): k is IntegrationKey => (INTEGRATION_KEYS as readonly string[]).includes(k);
 
