@@ -17,7 +17,7 @@ import { type SsoService } from './sso.service';
 import { type PasswordResetService, newPasswordSchema } from './password-reset.service';
 import { type EntitlementsService } from '../super-admin/entitlements.service';
 import { type IntegrationSettingsService } from '../platform/integration-settings.service';
-import { integration } from '../platform/integrations';
+import { emailService } from '../distribution/mailer';
 import { ALL_ROLES } from './decorators';
 
 const loginSchema = z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1).max(200) });
@@ -203,7 +203,7 @@ export class AuthController {
 
   /** Whether "forgot password" can send email, so the sign-in page can say what will happen. */
   passwordOptions() {
-    return { forgotPasswordEmail: integration('sendgrid').enabled };
+    return { forgotPasswordEmail: emailService() !== null };
   }
 
   /** Sets a new password from a reset link. Signs out every session; the member then signs in. */

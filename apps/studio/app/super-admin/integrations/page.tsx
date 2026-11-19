@@ -1,6 +1,6 @@
 'use client';
 /**
- * Super admin: every integration. The platform integrations (AI, IPinfo, Deepgram, Twilio, SendGrid,
+ * Super admin: every integration. The platform integrations (AI, IPinfo, Deepgram, Twilio, SMTP email, SendGrid,
  * Stripe, file storage, SampAudience, CDN) are set up on the Integrations settings page; each organization's own integrations
  * (single sign-on, SCIM, webhooks, API keys, vendors, AI) can be allowed or blocked here.
  */
