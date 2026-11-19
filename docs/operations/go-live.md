@@ -88,7 +88,7 @@ reaches every server and the background worker within 15 seconds, with no restar
 
 | Integration  | What it needs                                                                                                                                                     | Where to get it                                                       |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Claude       | API key and model (e.g. `claude-opus-5-5`); optional per-task models and prices                                                                                   | console.anthropic.com → API keys                                      |
+| Claude       | API key; model optional (defaults to `claude-opus-5-5`), per-task models, prices                                                                                  | console.anthropic.com → API keys                                      |
 | IPinfo       | Access token on a plan with privacy detection                                                                                                                     | ipinfo.io → Token                                                     |
 | Deepgram     | API key and model (e.g. `nova-3`)                                                                                                                                 | console.deepgram.com → API keys                                       |
 | Twilio       | Account SID, auth token, a caller ID (phone dialer) and/or an SMS sender                                                                                          | console.twilio.com → Account info, Phone numbers                      |
@@ -98,17 +98,6 @@ reaches every server and the background worker within 15 seconds, with no restar
 | Amazon S3    | Bucket, region and access keys (only when files go to S3 instead of the server)                                                                                   | The S3 console                                                        |
 | SampAudience | Address, client secret and outcome secret                                                                                                                         | The SampAudience team                                                 |
 | CDN          | Only with a CDN in front: the shared secret it sends as `X-Zapx-Edge`                                                                                             | Your own random value (`openssl rand -hex 32`)                        |
-| Integration  | What it needs                                                                    | Where to get it                                                       |
-| ------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Claude       | API key; model optional (defaults to `claude-opus-5-5`), per-task models, prices | console.anthropic.com → API keys                                      |
-| IPinfo       | Access token on a plan with privacy detection                                    | ipinfo.io → Token                                                     |
-| Deepgram     | API key and model (e.g. `nova-3`)                                                | console.deepgram.com → API keys                                       |
-| Twilio       | Account SID, auth token, a caller ID (phone dialer) and/or an SMS sender         | console.twilio.com → Account info, Phone numbers                      |
-| SendGrid     | API key with Mail Send, a verified sender address (invitations, password resets) | app.sendgrid.com → Settings → API Keys, Sender Authentication         |
-| Stripe       | Secret key, webhook signing secret, plan prices (`{"team":"price_..."}`)         | dashboard.stripe.com → Developers; add the webhook URL the page shows |
-| Amazon S3    | Bucket, region and access keys (only when files go to S3 instead of the server)  | The S3 console                                                        |
-| SampAudience | Address, client secret and outcome secret                                        | The SampAudience team                                                 |
-| CDN          | Only with a CDN in front: the shared secret it sends as `X-Zapx-Edge`            | Your own random value (`openssl rand -hex 32`)                        |
 
 The super admin console (Super admin → Integrations) shows the same integrations for the whole
 installation. For scripted installs, `node apps/api/dist/cli/set-integration.js <key> -` saves one
