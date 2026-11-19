@@ -51,6 +51,8 @@ export const createOrgSchema = z.object({
     .max(200)
     .refine((p) => !isCommonPassword(p), 'This password is too common. Choose another one.')
     .optional(),
+  /** Client feedback 2026-11: SampCode makes a strong password and returns the login details once. */
+  generatePassword: z.boolean().optional(),
   plan: z.string().min(1).max(40),
   subscriptionStatus: status.optional(),
   subscriptionEndsAt: when.optional(),
@@ -78,6 +80,8 @@ export const createUserSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email().toLowerCase(),
   role: z.enum(['ADMIN', 'PROGRAMMER', 'VIEWER', 'INTERVIEWER']),
+  /** Make a strong password and return the login details once, instead of a setup link. */
+  generatePassword: z.boolean().optional(),
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 

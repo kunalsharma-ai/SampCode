@@ -185,7 +185,7 @@ field in two releases (stop using it, then clean up the documents).
 | Production (compose) | the `backup` service: a mongodump archive every 24 hours into `./backups` on the server, keeps 14; copy it off the server       | stop `api` and `worker`, `mongorestore --drop` in the backup container, then `migrate` ([operations/database.md](../operations/database.md#backups-and-recovery)) |
 
 Files (exports, media, photos, recordings) are **not** in the database: back up `FILES_DIR` (local)
-or, in production, the `files` Docker volume; with `FILE_STORE=s3` use the bucket's versioning. Test a
+or, in production, the `files` Docker volume; with Settings → Integrations → Amazon S3 use the bucket's versioning. Test a
 restore regularly (quarterly is the target in the operations guide).
 
 ## 9. Every table and field

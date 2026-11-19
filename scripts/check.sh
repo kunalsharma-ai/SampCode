@@ -45,7 +45,7 @@ if [ "$quick" = 0 ]; then
     step "Production compose file (docker compose config)"
     # Placeholder values only: the file refuses to load without the required settings.
     STUDIO_DOMAIN=app.test RUNTIME_DOMAIN=survey.test CAPI_DOMAIN=capi.test ACME_EMAIL=ops@app.test \
-      JWT_SECRET=x SECRETS_KEY=y SIGNING_KEYS_SECRET=z MONGO_ROOT_PASSWORD=r MONGO_APP_PASSWORD=p ENV_FILE=.env.production.example \
+      MONGO_ROOT_PASSWORD=r MONGO_APP_PASSWORD=p ENV_FILE=.env.production.example \
       docker compose -f docker-compose.prod.yml --env-file .env.production.example config -q; passed+=("compose")
   else
     echo "Docker Compose is not installed: skipped the production compose check."

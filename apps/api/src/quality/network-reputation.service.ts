@@ -74,7 +74,7 @@ export class NetworkReputationService {
     this.cache.clear();
   }
 
-  /** Built from Settings > Integrations (or NETWORK_REPUTATION and IPINFO_TOKEN), rebuilt when they change. */
+  /** Built from Settings > Integrations, rebuilt when it changes. */
   private built?: { fingerprint: string; provider: NetworkReputationProvider | null };
 
   private current(): NetworkReputationProvider | null {

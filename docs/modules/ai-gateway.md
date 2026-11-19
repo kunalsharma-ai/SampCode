@@ -18,14 +18,15 @@ provider with the task's model, then records tokens, cost and outcome in `AiUsag
 
 | Task        | Used by                              | Model setting                     | Input redaction                                      |
 | ----------- | ------------------------------------ | --------------------------------- | ---------------------------------------------------- |
-| `architect` | AI Survey Architect, document import | `AI_MODEL_ARCHITECT` → `AI_MODEL` | brief and text documents (PDFs are sent as they are) |
-| `translate` | Language Studio                      | `AI_MODEL_TRANSLATE` → `AI_MODEL` | none (survey texts are the product)                  |
+| `architect` | AI Survey Architect, document import | Architect model → default model   | brief and text documents (PDFs are sent as they are) |
+| `translate` | Language Studio                      | Translation model → default model | none (survey texts are the product)                  |
 
 ## Settings
 
-Server: `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_MODEL_<TASK>`, `AI_PRICING`
-(USD per million tokens per model), `AI_MAX_RETRIES`, `AI_TIMEOUT_MS`, `AI_BREAKER_FAILURES`,
-`AI_BREAKER_OPEN_MS`, `AI_DEFAULT_RPM`, `AI_DEFAULT_RPD`.
+Installation (Settings › Integrations › Claude, stored encrypted in the database; ADR 0043): the API
+key, the default model, optional models per task and the price table (USD per million tokens per
+model). Server environment (no keys): `AI_PROVIDER`, `AI_MAX_RETRIES`, `AI_TIMEOUT_MS`,
+`AI_BREAKER_FAILURES`, `AI_BREAKER_OPEN_MS`, `AI_DEFAULT_RPM`, `AI_DEFAULT_RPD`.
 
 Organization (Settings › AI, administrators): on/off, allowed tasks, requests per minute and per
 day, monthly budget, redaction; this month's usage and cost.
@@ -36,4 +37,5 @@ day, monthly budget, redaction; this month's usage and cost.
    and map errors to `AiError`.
 2. Add the name to `AI_PROVIDER` in `config.ts` and a case in `DynamicAiProvider`
    (`apps/api/src/ai/dynamic-ai.provider.ts`).
-3. Add its models to `AI_PRICING`.
+3. Add its models to the price table in Settings › Integrations, and its key fields to
+   `apps/api/src/platform/integrations.ts`.

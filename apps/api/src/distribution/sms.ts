@@ -1,7 +1,7 @@
 /**
  * SMS sending for invitations and reminders (blueprint phase 5).
  *
- * - Off by default (SMS_PROVIDER=off): no text message leaves SampCode.
+ * - Off until Twilio is set up with an SMS sender in Settings > Integrations: no text message leaves SampCode.
  * - Provider: Twilio Programmable Messaging (`POST /2010-04-01/Accounts/{sid}/Messages.json`, 201
  *   when queued). Another provider is one class implementing SmsProvider.
  *
@@ -57,11 +57,10 @@ export class TwilioSmsProvider implements SmsProvider {
 
 /** The configured provider, or null when SMS is off. */
 export function smsProvider(): SmsProvider | null {
-  const c = config();
-  if (c.SMS_PROVIDER !== 'twilio') return null;
-  // The Twilio account comes from Settings > Integrations (or the TWILIO_* variables until it is set).
-  const t = integration('twilio').values;
-  return new TwilioSmsProvider(t.accountSid, t.authToken, c.TWILIO_API_BASE, c.SMS_FROM);
+  // The Twilio account and the sender come from Settings > Integrations.
+  const t = integration('twilio');
+  if (!t.enabled || !t.values.smsFrom) return null;
+  return new TwilioSmsProvider(t.values.accountSid!, t.values.authToken!, config().TWILIO_API_BASE, t.values.smsFrom);
 }
 
 /** Phone numbers are stored in E.164. Accepts spaces, dashes, dots and brackets; needs the leading +. */

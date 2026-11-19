@@ -111,10 +111,13 @@ export function Preview({
   def: sourceDef,
   presentation = defaultPresentation(),
   compact = false,
+  fullPage = false,
 }: {
   def: SurveyDefinition;
   presentation?: Presentation;
   compact?: boolean;
+  /** The question preview tab: the whole width, no device matrix or answers panel. */
+  fullPage?: boolean;
 }) {
   const [seed, setSeed] = useState(() => Math.random().toString(36).slice(2));
   const [language, setLanguage] = useState(sourceDef.language);
@@ -248,7 +251,10 @@ export function Preview({
   );
 
   return (
-    <div className={compact ? 'preview-compact' : 'grid2'} style={compact ? undefined : { gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
+    <div
+      className={compact ? 'preview-compact' : fullPage ? 'preview-full' : 'grid2'}
+      style={compact || fullPage ? undefined : { gridTemplateColumns: 'minmax(0,1fr) 300px' }}
+    >
       <div>
         <div className="row" style={{ marginBottom: 8 }}>
           {(Object.keys(WIDTHS) as Device[]).map((d) => (
@@ -265,7 +271,7 @@ export function Preview({
               ))}
             </select>
           ) : null}
-          {compact ? null : (
+          {compact || fullPage ? null : (
             <button aria-pressed={matrix} onClick={() => setMatrix((m) => !m)}>
               Device matrix
             </button>
@@ -297,7 +303,7 @@ export function Preview({
           </div>
         )}
       </div>
-      {compact ? null : (
+      {compact || fullPage ? null : (
         <aside className="panel">
           <h3>Answers so far</h3>
           <pre className="mono small" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>

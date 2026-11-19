@@ -199,8 +199,26 @@ function generateAnswer(q: Question, g: GenContext): AnswerValue | undefined {
       const v = lo + g.rng.next() * (hi - lo);
       return q.integer ? Math.round(v) : Math.round(v * 100) / 100;
     }
-    case 'open':
-      return `Synthetic answer ${++g.serial}`.slice(0, q.maxLength);
+    case 'open': {
+      const n = ++g.serial;
+      if (q.dontKnow && g.rng.chance(0.1)) return q.dontKnow.code;
+      switch (q.format) {
+        case 'email':
+          return `synthetic${n}@example.com`;
+        case 'phone':
+          return `+1 555 01${String(n % 100).padStart(2, '0')}`;
+        case 'date':
+          return `2026-0${(n % 9) + 1}-1${n % 10}`;
+        case 'time':
+          return `1${n % 10}:${String(n % 60).padStart(2, '0')}`;
+        case 'datetime':
+          return `2026-0${(n % 9) + 1}-1${n % 10}T1${n % 10}:00`;
+        case 'location':
+          return '51.50735,-0.12776';
+        default:
+          return `Synthetic answer ${n}`.slice(0, q.maxLength);
+      }
+    }
     case 'photo':
       // A reference only: synthetic respondents never upload files.
       return `synthetic-photo-${++g.serial}`;

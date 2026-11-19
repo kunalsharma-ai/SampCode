@@ -10,12 +10,16 @@ import { conditionHoldsFor, conjointTasksFor, maxDiffSetsFor } from '@zapx/logic
 import type { AnswerValue, Answers, DeviceSettings, Option, Question, QuestionMedia, Theme } from '@zapx/survey-schema';
 import { formatNumber, textDirection } from '@zapx/survey-schema';
 import { DEFAULT_EYE_MESSAGES, EYETRACK_CSS, EyeTrack, type EyeTrackMessages, type EyeTrackingHost } from './eyetrack';
+import { sanitizeQuestionHtml } from './html';
 
 export * from './gaze';
+export { sanitizeQuestionHtml, textToHtml } from './html';
 export { DEFAULT_EYE_MESSAGES, EyeTrack, type EyeTrackMessages, type EyeTrackingHost, type FaceLandmarkSource } from './eyetrack';
 
 export type DisplayQuestion = Question & {
   renderedText?: string;
+  /** Custom HTML with piped answers escaped (from renderQuestion); sanitized again before it is shown. */
+  renderedHtml?: string;
   condition?: string;
   /** MaxDiff sets or conjoint tasks for this respondent (from renderQuestion). */
   design?: { version: number; sets?: number[][]; tasks?: number[][][] };
@@ -61,9 +65,13 @@ export interface RendererMessages extends EyeTrackMessages {
   choiceSet: string;
   choiceTask: string;
   choiceOption: string;
+  useLocation: string;
+  locationUnavailable: string;
 }
 export const DEFAULT_RENDERER_MESSAGES: RendererMessages = {
   ...DEFAULT_EYE_MESSAGES,
+  useLocation: 'Use my current location',
+  locationUnavailable: 'Your location could not be read. Type it instead.',
   unsorted: 'Not sorted',
   takePhoto: 'Take or choose a photo',
   retakePhoto: 'Use a different photo',
@@ -345,10 +353,14 @@ export function QuestionView({
   const text = q.renderedText ?? q.text;
   const media = q.media ? <MediaBlock media={q.media} url={mediaUrl(q.media.id)} onPlayed={onMediaPlayed} /> : null;
   const speak = readAloud ? <ReadAloud text={spokenText(q)} language={language} messages={messages} /> : null;
+  const html = useMemo(() => {
+    const source = q.renderedHtml ?? q.html;
+    return source ? sanitizeQuestionHtml(source) : null;
+  }, [q.renderedHtml, q.html]);
   if (q.type === 'info') {
     return (
       <section className="zx-question zx-info" data-question={q.id}>
-        <p className="zx-text">{text}</p>
+        {html !== null ? <div className="zx-text zx-html" dangerouslySetInnerHTML={{ __html: html }} /> : <p className="zx-text">{text}</p>}
         {speak}
         {media}
       </section>
@@ -365,7 +377,7 @@ export function QuestionView({
       aria-invalid={!!error}
       disabled={disabled}
     >
-      <legend className="zx-text">
+      <legend className={html !== null ? 'zx-sr-only' : 'zx-text'}>
         {text}
         {q.required ? (
           <span className="zx-required" aria-hidden="true">
@@ -375,6 +387,12 @@ export function QuestionView({
         ) : null}
         {q.required ? <span className="zx-sr-only"> (required)</span> : null}
       </legend>
+      {html !== null ? (
+        <div className="zx-text zx-html" aria-hidden="true">
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+          {q.required ? <span className="zx-required"> *</span> : null}
+        </div>
+      ) : null}
       {speak}
       {q.help ? (
         <p className="zx-help" id={helpId}>
@@ -382,10 +400,13 @@ export function QuestionView({
         </p>
       ) : null}
       {media}
-      {q.type === 'single' ? (
+      {(q.type === 'single' || q.type === 'multi') && q.display === 'dropdown' ? (
+        <ChoiceDropdown label={text} options={q.options} multiple={q.type === 'multi'} value={value} onChange={onChange} />
+      ) : null}
+      {q.type === 'single' && q.display !== 'dropdown' ? (
         <ChoiceList name={id} options={q.options} multiple={false} value={value} onChange={onChange} mediaUrl={mediaUrl} />
       ) : null}
-      {q.type === 'multi' ? (
+      {q.type === 'multi' && q.display !== 'dropdown' ? (
         <ChoiceList name={id} options={q.options} multiple value={value} onChange={onChange} mediaUrl={mediaUrl} />
       ) : null}
       {q.type === 'scale' ? <Scale question={q} name={id} value={value} onChange={onChange} /> : null}
@@ -401,44 +422,57 @@ export function QuestionView({
         <BarcodeInput label={text} maxLength={q.maxLength} value={value} onChange={onChange} messages={messages} />
       ) : null}
       {q.type === 'open' ? (
-        q.multiline ? (
-          <textarea
-            className="zx-input zx-textarea"
-            aria-label={text}
-            maxLength={q.maxLength}
-            rows={4}
-            value={typeof value === 'string' ? value : ''}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        ) : (
-          <input
-            className="zx-input"
-            type="text"
-            aria-label={text}
-            maxLength={q.maxLength}
-            value={typeof value === 'string' ? value : ''}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        )
+        <DontKnowWrap dontKnow={q.dontKnow} name={id} value={value} onChange={onChange}>
+          {(dk) =>
+            q.multiline ? (
+              <textarea
+                className="zx-input zx-textarea"
+                aria-label={text}
+                maxLength={q.maxLength}
+                rows={4}
+                disabled={dk}
+                value={typeof value === 'string' ? value : ''}
+                onChange={(e) => onChange(e.target.value)}
+              />
+            ) : (
+              <OpenInput
+                format={q.format}
+                label={text}
+                maxLength={q.maxLength}
+                disabled={dk}
+                value={value}
+                onChange={onChange}
+                messages={messages}
+              />
+            )
+          }
+        </DontKnowWrap>
       ) : null}
       {q.type === 'numeric' && q.display === 'slider' && q.min !== undefined && q.max !== undefined ? (
-        <Slider question={q} label={text} value={value} onChange={onChange} />
+        <DontKnowWrap dontKnow={q.dontKnow} name={id} value={value} onChange={onChange}>
+          {() => <Slider question={q} label={text} value={value === q.dontKnow?.code ? null : value} onChange={onChange} />}
+        </DontKnowWrap>
       ) : null}
       {q.type === 'numeric' && !(q.display === 'slider' && q.min !== undefined && q.max !== undefined) ? (
-        <div className="zx-numeric">
-          <input
-            className="zx-input"
-            type="number"
-            inputMode={q.integer ? 'numeric' : 'decimal'}
-            aria-label={text}
-            min={q.min}
-            max={q.max}
-            step={q.integer ? 1 : 'any'}
-            value={typeof value === 'number' ? value : typeof value === 'string' ? value : ''}
-            onChange={(e) => onChange(e.target.value === '' ? null : (e.target.value as unknown as number))}
-          />
-          {q.unit ? <span className="zx-unit">{q.unit}</span> : null}
-        </div>
+        <DontKnowWrap dontKnow={q.dontKnow} name={id} value={value} onChange={onChange}>
+          {(dk) => (
+            <div className="zx-numeric">
+              <input
+                className="zx-input"
+                type="number"
+                inputMode={q.integer ? 'numeric' : 'decimal'}
+                aria-label={text}
+                min={q.min}
+                max={q.max}
+                step={q.integer ? 1 : 'any'}
+                disabled={dk}
+                value={dk ? '' : typeof value === 'number' ? value : typeof value === 'string' ? value : ''}
+                onChange={(e) => onChange(e.target.value === '' ? null : (e.target.value as unknown as number))}
+              />
+              {q.unit ? <span className="zx-unit">{q.unit}</span> : null}
+            </div>
+          )}
+        </DontKnowWrap>
       ) : null}
       {q.type === 'grid' ? <Grid question={q} name={id} value={value} onChange={onChange} /> : null}
       {q.type === 'cardsort' ? <CardSort question={q} value={value} onChange={onChange} messages={messages} /> : null}
@@ -459,6 +493,150 @@ export function QuestionView({
         </p>
       ) : null}
     </fieldset>
+  );
+}
+
+/** An exclusive "Don't know" box under a text or number answer: ticking it stores its code and blocks the input. */
+function DontKnowWrap({
+  dontKnow,
+  name,
+  value,
+  onChange,
+  children,
+}: {
+  dontKnow?: { code: number; label: string };
+  name: string;
+  value: AnswerValue;
+  onChange: (v: AnswerValue) => void;
+  children: (dk: boolean) => React.ReactNode;
+}) {
+  const dk = !!dontKnow && value === dontKnow.code;
+  if (!dontKnow) return <>{children(false)}</>;
+  return (
+    <>
+      {children(dk)}
+      <label className={`zx-option zx-dontknow${dk ? ' zx-selected' : ''}`}>
+        <input type="checkbox" name={`${name}-dk`} checked={dk} onChange={(e) => onChange(e.target.checked ? dontKnow.code : null)} />
+        <span>{dontKnow.label}</span>
+      </label>
+    </>
+  );
+}
+
+const OPEN_INPUT_TYPES: Record<string, string> = { email: 'email', phone: 'tel', date: 'date', time: 'time', datetime: 'datetime-local' };
+
+function OpenInput({
+  format,
+  label,
+  maxLength,
+  disabled,
+  value,
+  onChange,
+  messages,
+}: {
+  format?: string;
+  label: string;
+  maxLength: number;
+  disabled?: boolean;
+  value: AnswerValue;
+  onChange: (v: AnswerValue) => void;
+  messages: RendererMessages;
+}) {
+  const [locError, setLocError] = useState(false);
+  const input = (
+    <input
+      className="zx-input"
+      type={(format && OPEN_INPUT_TYPES[format]) || 'text'}
+      inputMode={format === 'phone' ? 'tel' : format === 'email' ? 'email' : undefined}
+      autoComplete={format === 'email' ? 'email' : format === 'phone' ? 'tel' : undefined}
+      aria-label={label}
+      maxLength={maxLength}
+      disabled={disabled}
+      value={typeof value === 'string' ? value : ''}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+  if (format !== 'location') return input;
+  const locate = () => {
+    setLocError(false);
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return setLocError(true);
+    navigator.geolocation.getCurrentPosition(
+      (p) => onChange(`${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`),
+      () => setLocError(true),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  };
+  return (
+    <div className="zx-location">
+      {input}
+      <button type="button" className="zx-button zx-secondary" onClick={locate} disabled={disabled}>
+        {messages.useLocation}
+      </button>
+      {locError ? <p className="zx-help">{messages.locationUnavailable}</p> : null}
+    </div>
+  );
+}
+
+/** Single choice as a select box, or multiple choice as a compact dropdown of checkboxes. */
+function ChoiceDropdown({
+  label,
+  options,
+  multiple,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Option[];
+  multiple: boolean;
+  value: AnswerValue;
+  onChange: (v: AnswerValue) => void;
+}) {
+  if (!multiple) {
+    return (
+      <select
+        className="zx-input zx-select"
+        aria-label={label}
+        value={typeof value === 'number' ? String(value) : ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      >
+        <option value="">—</option>
+        {options.map((o) => (
+          <option key={o.code} value={o.code}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  const selected = new Set<number>(Array.isArray(value) ? value : []);
+  const toggle = (o: Option) => {
+    const next = new Set(selected);
+    if (next.has(o.code)) next.delete(o.code);
+    else {
+      if (o.exclusive) next.clear();
+      else for (const x of options) if (x.exclusive) next.delete(x.code);
+      next.add(o.code);
+    }
+    onChange(next.size ? [...next] : null);
+  };
+  const summary = options
+    .filter((o) => selected.has(o.code))
+    .map((o) => o.label)
+    .join(', ');
+  return (
+    <details className="zx-multi-dropdown">
+      <summary className="zx-input">{summary || '—'}</summary>
+      <div className="zx-options" role="group" aria-label={label}>
+        {options.map((o) => (
+          <label key={o.code} className={`zx-option${selected.has(o.code) ? ' zx-selected' : ''}`}>
+            <span className="zx-option-row">
+              <input type="checkbox" value={o.code} checked={selected.has(o.code)} onChange={() => toggle(o)} />
+              <span>{o.label}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -527,9 +705,16 @@ function Scale({
   for (let i = q.min; i <= q.max; i++) points.push(i);
   return (
     <div className="zx-scale-wrap">
-      <div className="zx-scale" role="radiogroup" style={{ ['--zx-points' as string]: points.length }}>
+      <div
+        className={`zx-scale${q.display === 'stars' ? ' zx-stars' : ''}`}
+        role="radiogroup"
+        style={{ ['--zx-points' as string]: points.length }}
+      >
         {points.map((n) => (
-          <label key={n} className={`zx-scale-point${value === n ? ' zx-selected' : ''}`}>
+          <label
+            key={n}
+            className={`zx-scale-point${value === n ? ' zx-selected' : ''}${q.display === 'stars' && typeof value === 'number' && value !== q.dontKnow?.code && n <= value ? ' zx-star-on' : ''}`}
+          >
             <input
               type="radio"
               name={name}
@@ -538,7 +723,7 @@ function Scale({
               onChange={() => onChange(n)}
               aria-label={n === q.min && q.minLabel ? `${n} ${q.minLabel}` : n === q.max && q.maxLabel ? `${n} ${q.maxLabel}` : String(n)}
             />
-            <span aria-hidden="true">{n}</span>
+            <span aria-hidden="true">{q.display === 'stars' ? '★' : n}</span>
           </label>
         ))}
       </div>
@@ -1392,6 +1577,12 @@ export const defaultThemeCss = `
 .zx-scale-point:focus-within{outline:2px solid var(--zx-accent);outline-offset:2px;}
 .zx-scale-ends{display:flex;justify-content:space-between;gap:12px;color:var(--zx-muted);font-size:.85rem;margin-top:6px;}
 .zx-scale-dk{margin-top:10px;}
+.zx-dontknow{margin-top:10px;}
+.zx-html p{margin:0 0 .5em;} .zx-html table{border-collapse:collapse;max-width:100%;} .zx-html td,.zx-html th{border:1px solid currentColor;padding:4px 8px;}
+.zx-select{max-width:100%;}
+.zx-multi-dropdown summary{cursor:pointer;list-style:none;} .zx-multi-dropdown[open] .zx-options{margin-top:8px;}
+.zx-location{display:flex;flex-wrap:wrap;gap:8px;align-items:center;} .zx-location .zx-input{flex:1 1 220px;}
+.zx-stars .zx-scale-point span{font-size:1.6em;line-height:1;opacity:.35;} .zx-stars .zx-star-on span{opacity:1;color:#f5b301;}
 .zx-slider{display:flex;flex-direction:column;gap:6px;width:100%;}
 .zx-slider input{width:100%;accent-color:var(--zx-accent);height:28px;}
 .zx-slider.zx-untouched input{opacity:.55;}
